@@ -3,6 +3,8 @@ module kacheem/backend
 go 1.27.4
 
 require (
+	github.com/alexedwards/scs/pgxstore v0.0.0-20261119174900-ed2e92329119
+	github.com/alexedwards/scs/v2 v2.9.0
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/pressly/goose/v3 v3.30.2
 	github.com/redis/go-redis/v9 v9.24.0

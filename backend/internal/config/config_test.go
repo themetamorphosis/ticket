@@ -16,6 +16,7 @@ func fullAPIEnv() map[string]string {
 		"REDIS_URL":          "redis://redis:6379/0",
 		"API_PUBLIC_LISTEN":  "unix:/run/kacheem/public.sock",
 		"API_STAFF_LISTEN":   "unix:/run/kacheem/staff.sock",
+		"PUBLIC_ORIGIN":      "https://tickets.example.org",
 		"SHUTDOWN_TIMEOUT":   "7s",
 		"UNRELATED_VARIABLE": "ignored",
 	}
@@ -31,6 +32,7 @@ func TestLoadAPIReadsEveryField(t *testing.T) {
 		RedisURL:        "redis://redis:6379/0",
 		PublicListen:    "unix:/run/kacheem/public.sock",
 		StaffListen:     "unix:/run/kacheem/staff.sock",
+		PublicOrigin:    "https://tickets.example.org",
 		ShutdownTimeout: 7 * time.Second,
 	}
 	if cfg != want {
@@ -55,7 +57,7 @@ func TestLoadAPIReportsAllMissingVariables(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	for _, name := range []string{"DATABASE_URL", "REDIS_URL", "API_PUBLIC_LISTEN", "API_STAFF_LISTEN"} {
+	for _, name := range []string{"DATABASE_URL", "REDIS_URL", "API_PUBLIC_LISTEN", "API_STAFF_LISTEN", "PUBLIC_ORIGIN"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("error %q does not name %s", err, name)
 		}

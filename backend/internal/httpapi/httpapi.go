@@ -23,12 +23,6 @@ type Check struct {
 	Fn   func(context.Context) error
 }
 
-// NewPublic returns the handler for the buyer-facing listener.
-func NewPublic(checks []Check) http.Handler {
-	mux := baseMux(checks)
-	return withDefaults(mux)
-}
-
 // NewStaff returns the handler for the VPN-only staff listener.
 func NewStaff(checks []Check) http.Handler {
 	mux := baseMux(checks)
@@ -49,9 +43,16 @@ func baseMux(checks []Check) *http.ServeMux {
 
 // get registers a GET (and HEAD) route that answers other methods with a JSON 405.
 func get(mux *http.ServeMux, path string, h http.HandlerFunc) {
-	mux.HandleFunc("GET "+path, h)
+	route(mux, "GET", "GET, HEAD", path, h)
+}
+
+// post registers a POST route that answers other methods with a JSON 405.
+func post(mux *http.ServeMux, path string, h http.HandlerFunc) { route(mux, "POST", "POST", path, h) }
+
+func route(mux *http.ServeMux, method, allow, path string, h http.HandlerFunc) {
+	mux.HandleFunc(method+" "+path, h)
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Allow", "GET, HEAD")
+		w.Header().Set("Allow", allow)
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed.")
 	})
 }
@@ -87,7 +88,17 @@ func withDefaults(next http.Handler) http.Handler {
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+	writeErrorWith(w, status, code, message, nil)
+}
+
+// writeErrorWith adds machine-readable details (field errors, remaining
+// places, an existing order reference) beside the code and message.
+func writeErrorWith(w http.ResponseWriter, status int, code, message string, extra map[string]any) {
+	e := map[string]any{"code": code, "message": message}
+	for k, v := range extra {
+		e[k] = v
+	}
+	writeJSON(w, status, map[string]any{"error": e})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

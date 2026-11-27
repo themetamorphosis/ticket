@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"kacheem/backend/internal/cmdutil"
 	"kacheem/backend/internal/config"
@@ -15,6 +16,7 @@ import (
 	"kacheem/backend/internal/postgres"
 	"kacheem/backend/internal/redisx"
 	"kacheem/backend/internal/server"
+	"kacheem/backend/internal/session"
 )
 
 var exit = os.Exit
@@ -57,7 +59,13 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	}
 	logger.Info("api listening", "public", cfg.PublicListen, "staff", cfg.StaffListen)
 	err = server.ServeAll(ctx, cfg.ShutdownTimeout,
-		server.Endpoint{Server: server.New(httpapi.NewPublic(checks), logger), Listener: public},
+		server.Endpoint{Server: server.New(httpapi.NewPublic(httpapi.PublicDeps{
+			DB:       pool,
+			Sessions: session.NewBuyer(pool, 30*time.Minute, httpapi.SessionError(logger)),
+			Origin:   cfg.PublicOrigin,
+			Checks:   checks,
+			Logger:   logger,
+		}), logger), Listener: public},
 		server.Endpoint{Server: server.New(httpapi.NewStaff(checks), logger), Listener: staff},
 	)
 	logger.Info("api stopped")

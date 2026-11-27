@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alexedwards/scs/v2"
 )
 
 func do(t *testing.T, h http.Handler, method, path string) (*httptest.ResponseRecorder, map[string]any) {
@@ -25,8 +28,12 @@ func do(t *testing.T, h http.Handler, method, path string) (*httptest.ResponseRe
 
 func ok(context.Context) error { return nil }
 
+func newPublic(checks []Check) http.Handler {
+	return NewPublic(PublicDeps{Sessions: scs.New(), Checks: checks, Logger: slog.New(slog.DiscardHandler)})
+}
+
 func handlers(checks ...Check) map[string]http.Handler {
-	return map[string]http.Handler{"public": NewPublic(checks), "staff": NewStaff(checks)}
+	return map[string]http.Handler{"public": newPublic(checks), "staff": NewStaff(checks)}
 }
 
 func TestHealth(t *testing.T) {
@@ -95,7 +102,7 @@ func TestReadyBoundsEachCheck(t *testing.T) {
 		return nil
 	}
 	start := time.Now()
-	do(t, NewPublic([]Check{{"slow", check}}), http.MethodGet, "/api/v1/ready")
+	do(t, newPublic([]Check{{"slow", check}}), http.MethodGet, "/api/v1/ready")
 	if deadline.IsZero() || deadline.Sub(start) > CheckTimeout+time.Second {
 		t.Fatalf("check deadline %v not bounded by %v", deadline, CheckTimeout)
 	}
@@ -115,7 +122,7 @@ func TestUnknownAPIPathIsJSONNotFound(t *testing.T) {
 
 func TestPublicListenerRejectsStaffRoutes(t *testing.T) {
 	for _, path := range []string{"/api/v1/ops/orders", "/api/v1/admissions"} {
-		rec, _ := do(t, NewPublic(nil), http.MethodPost, path)
+		rec, _ := do(t, newPublic(nil), http.MethodPost, path)
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("public %s: status %d, want 404", path, rec.Code)
 		}

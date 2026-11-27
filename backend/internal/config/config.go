@@ -17,8 +17,10 @@ type API struct {
 	DatabaseURL string
 	RedisURL    string
 	// PublicListen and StaffListen are "unix:/path" or "tcp:host:port".
-	PublicListen    string
-	StaffListen     string
+	PublicListen string
+	StaffListen  string
+	// PublicOrigin is the exact buyer site origin, e.g. https://tickets.example.org.
+	PublicOrigin    string
 	ShutdownTimeout time.Duration
 }
 
@@ -35,6 +37,7 @@ func LoadAPI(getenv func(string) string) (API, error) {
 		RedisURL:        required(getenv, "REDIS_URL", &errs),
 		PublicListen:    required(getenv, "API_PUBLIC_LISTEN", &errs),
 		StaffListen:     required(getenv, "API_STAFF_LISTEN", &errs),
+		PublicOrigin:    required(getenv, "PUBLIC_ORIGIN", &errs),
 		ShutdownTimeout: DefaultShutdownTimeout,
 	}
 	if v := getenv("SHUTDOWN_TIMEOUT"); v != "" {
