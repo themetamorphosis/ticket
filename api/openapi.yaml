@@ -1,0 +1,90 @@
+openapi: 3.1.0
+info:
+  title: Kacheem Comms ticketing API
+  version: 0.1.0
+  description: |
+    Versioned contract shared by the Go API and both Next.js apps.
+    The public (buyer) and staff (VPN-only) listeners serve separate route
+    sets; a staff route is never reachable through the public listener.
+    Every response carries `Cache-Control: no-store`.
+servers:
+  - url: /api/v1
+tags:
+  - name: system
+    description: Served on both the public and the staff listener.
+paths:
+  /health:
+    get:
+      tags: [system]
+      operationId: getHealth
+      summary: Liveness. The process is up and serving HTTP.
+      responses:
+        "200":
+          description: Alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { const: ok }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /ready:
+    get:
+      tags: [system]
+      operationId: getReady
+      summary: Readiness. PostgreSQL and Redis answer within the check timeout.
+      description: Failing dependencies are named, never described, so internal errors do not leak.
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { const: ready }
+        "503":
+          description: One or more dependencies failed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, failing]
+                properties:
+                  status: { const: unavailable }
+                  failing:
+                    type: array
+                    items: { type: string, enum: [postgres, redis] }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+components:
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable machine-readable code, for example `not_found`.
+            message:
+              type: string
+              description: Short human-readable text, safe to show.
+  responses:
+    NotFound:
+      description: Unknown API route.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    MethodNotAllowed:
+      description: Route exists but not for this method. `Allow` lists the valid ones.
+      headers:
+        Allow:
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

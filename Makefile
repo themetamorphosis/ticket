@@ -26,7 +26,7 @@ NODE := $(DOCKER_RUN) -w /repo/web -e npm_config_cache=/repo/.cache/npm \
 .PHONY: help up down reset cache \
 	go-fmt go-fmt-fix go-vet go-test go-cover go-build go-vulncheck migrate \
 	web-install web-lint web-test web-build \
-	verify verify-go verify-web
+	no-pragmas verify verify-go verify-web
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -85,8 +85,11 @@ web-build: web-install ## Static exports into web/*/out
 
 # ---------- Gate ----------
 
+no-pragmas: ## Fail on coverage-ignore or lint-disable comments
+	sh scripts/check-no-ignore-pragmas.sh
+
 verify-go: go-fmt go-vet go-cover go-vulncheck go-build
 verify-web: web-lint web-test web-build
 
-verify: verify-go verify-web ## Everything that must pass before a manual push
+verify: no-pragmas verify-go verify-web ## Everything that must pass before a manual push
 	@echo "verify: OK"

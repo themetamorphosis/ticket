@@ -5,7 +5,7 @@ export default defineConfig([
   ...nextVitals,
   globalIgnores(['.next/**', 'out/**', 'coverage/**']),
   {
-    // No inline eslint-disable comments: fix the code or change this config in review.
+    // Inline lint-disable comments are rejected: fix the code or change this config in review.
     linterOptions: { noInlineConfig: true, reportUnusedDisableDirectives: 'error' },
   },
 ]);
