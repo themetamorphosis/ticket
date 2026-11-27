@@ -15,9 +15,11 @@ type fakeTB struct {
 	cleanups []func()
 }
 
-func (f *fakeTB) Helper()                           {}
-func (f *fakeTB) Fatalf(format string, args ...any) { f.failed = append(f.failed, fmt.Sprintf(format, args...)) }
-func (f *fakeTB) Cleanup(fn func())                 { f.cleanups = append(f.cleanups, fn) }
+func (f *fakeTB) Helper() {}
+func (f *fakeTB) Fatalf(format string, args ...any) {
+	f.failed = append(f.failed, fmt.Sprintf(format, args...))
+}
+func (f *fakeTB) Cleanup(fn func()) { f.cleanups = append(f.cleanups, fn) }
 func (f *fakeTB) runCleanups() {
 	for i := len(f.cleanups) - 1; i >= 0; i-- {
 		f.cleanups[i]()

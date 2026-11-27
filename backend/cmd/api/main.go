@@ -1,0 +1,65 @@
+// Command api serves the buyer API on the public listener and the staff API on
+// the VPN-only listener. NGINX proxies /api/v1/* to each over a Unix socket.
+package main
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"os"
+
+	"kacheem/backend/internal/cmdutil"
+	"kacheem/backend/internal/config"
+	"kacheem/backend/internal/httpapi"
+	"kacheem/backend/internal/listen"
+	"kacheem/backend/internal/postgres"
+	"kacheem/backend/internal/redisx"
+	"kacheem/backend/internal/server"
+)
+
+var exit = os.Exit
+
+func main() {
+	exit(cmdutil.Main("api", func(ctx context.Context) error {
+		return run(ctx, os.Getenv, os.Stderr)
+	}, os.Stderr))
+}
+
+func run(ctx context.Context, getenv func(string) string, logOut io.Writer) error {
+	logger := slog.New(slog.NewJSONHandler(logOut, nil))
+	cfg, err := config.LoadAPI(getenv)
+	if err != nil {
+		return err
+	}
+	pool, err := postgres.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	rdb, err := redisx.Open(cfg.RedisURL)
+	if err != nil {
+		return err
+	}
+	defer rdb.Close()
+
+	checks := []httpapi.Check{
+		{Name: "postgres", Fn: pool.Ping},
+		{Name: "redis", Fn: redisx.Ping(rdb)},
+	}
+	public, err := listen.Listen(cfg.PublicListen)
+	if err != nil {
+		return err
+	}
+	staff, err := listen.Listen(cfg.StaffListen)
+	if err != nil {
+		public.Close()
+		return err
+	}
+	logger.Info("api listening", "public", cfg.PublicListen, "staff", cfg.StaffListen)
+	err = server.ServeAll(ctx, cfg.ShutdownTimeout,
+		server.Endpoint{Server: server.New(httpapi.NewPublic(checks), logger), Listener: public},
+		server.Endpoint{Server: server.New(httpapi.NewStaff(checks), logger), Listener: staff},
+	)
+	logger.Info("api stopped")
+	return err
+}

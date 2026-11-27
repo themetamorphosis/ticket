@@ -81,7 +81,7 @@ func TestAuditEventConstraints(t *testing.T) {
 		t.Fatalf("system event without actor_id rejected: %v", err)
 	}
 	bad := []struct {
-		name                       string
+		name                        string
 		kind, actor, action, detail any
 	}{
 		{"unknown actor kind", "robot", "r-1", "x", `{}`},

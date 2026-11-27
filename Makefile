@@ -24,7 +24,7 @@ NODE := $(DOCKER_RUN) -w /repo/web -e npm_config_cache=/repo/.cache/npm \
 	-e NEXT_TELEMETRY_DISABLED=1 $(NODE_IMAGE)
 
 .PHONY: help up down reset cache \
-	go-fmt go-vet go-test go-cover go-build go-vulncheck migrate \
+	go-fmt go-fmt-fix go-vet go-test go-cover go-build go-vulncheck migrate \
 	web-install web-lint web-test web-build \
 	verify verify-go verify-web
 
@@ -47,6 +47,9 @@ reset: ## Stop local services and delete their data
 
 go-fmt: cache ## Fail if any Go file is not gofmt-formatted
 	@out="$$($(GO) gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+
+go-fmt-fix: cache ## Rewrite Go files with gofmt
+	$(GO) gofmt -w .
 
 go-vet: cache
 	$(GO) go vet ./...
