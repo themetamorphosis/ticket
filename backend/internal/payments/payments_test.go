@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"kacheem/backend/internal/dbx"
@@ -760,4 +761,32 @@ func TestNotifyUnderDatabaseFailures(t *testing.T) {
 		svc := &payments.Service{DB: db, Gateway: &notifyingGateway{providerCaptures: providerCaptures{e.gw}}}
 		return svc.Notify(ctx, []byte(pref))
 	}, func(int, error) { e.assertBooks() })
+}
+
+func TestOnPaidRunsInThePaymentTransaction(t *testing.T) {
+	e := setup(t)
+	var paid []string
+	boom := errors.New("issuance failed")
+	fail := true
+	e.svc.OnPaid = func(ctx context.Context, tx pgx.Tx, orderID string) error {
+		if fail {
+			return boom
+		}
+		paid = append(paid, orderID)
+		return nil
+	}
+	buyer, ref := e.reserve()
+	redirect := e.checkout(buyer, ref)
+	back, _ := e.gw.Decide(ctx, providerRef(redirect), "approve")
+	u, _ := url.Parse(back)
+	// Issuance failing rolls the payment record back; the capture is kept
+	// open for reconciliation instead of being half-recorded.
+	if _, err := e.svc.Return(ctx, u.Query()); !errors.Is(err, boom) || e.orderStatus(ref) != "held" {
+		t.Fatalf("failing hook: %v %s", err, e.orderStatus(ref))
+	}
+	fail = false
+	if _, err := e.svc.Reconcile(ctx, 0, 10); err != nil || e.orderStatus(ref) != "paid" || len(paid) != 1 {
+		t.Fatalf("after reconcile: %v %s %v", err, e.orderStatus(ref), paid)
+	}
+	e.assertBooks()
 }

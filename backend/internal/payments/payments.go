@@ -41,6 +41,9 @@ type Service struct {
 	// ReturnURL is where the provider sends the buyer back, for example
 	// "https://tickets.example.org/payments/return/bkash".
 	ReturnURL string
+	// OnPaid runs inside the transaction that marks an order paid, so the
+	// order's tickets and fulfilment job commit with the payment or not at all.
+	OnPaid func(ctx context.Context, tx pgx.Tx, orderID string) error
 }
 
 func newRef(prefix string) string {
@@ -286,7 +289,10 @@ func (s *Service) finalize(ctx context.Context, attemptID string, res Result) er
 			return event(ctx, tx, a.ID, "mismatch", map[string]any{"expected_minor": a.AmountMinor, "currency": a.Currency})
 		}
 		if ord.Status == "held" && !ord.Expired {
-			return orders.SettleHold(ctx, tx, orderID, "paid", true)
+			if err := orders.SettleHold(ctx, tx, orderID, "paid", true); err != nil || s.OnPaid == nil {
+				return err
+			}
+			return s.OnPaid(ctx, tx, orderID)
 		}
 		reason := "late_payment"
 		if ord.Status == "paid" {
