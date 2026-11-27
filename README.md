@@ -33,6 +33,13 @@ http://localhost:8088/. It seeds a development event, publishes its
 `event.json`, builds the static export and starts the Go API, the worker and
 NGINX with production-style routing. `make app-down` stops the stack.
 
+Payments run through the local **fake gateway** by default
+(`PAYMENT_PROVIDER=fake`): **Pay** opens a development page where you approve,
+decline or cancel. No real money is involved. To use the bKash sandbox instead, put
+`PAYMENT_PROVIDER=bkash` and the `BKASH_*` values from `.env.example` in your
+gitignored `.env`, then run `make app-up` again. Credentials never go in the
+repository.
+
 If ports 5432 or 6379 are already taken on your machine, copy `.env.example` to
 `.env` and change `DB_HOST_PORT` and `REDIS_HOST_PORT`. The tests talk to the
 services inside the Compose network, so host ports never affect them.
