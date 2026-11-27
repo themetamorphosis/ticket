@@ -3,6 +3,7 @@ package tickets
 import (
 	_ "embed"
 	"fmt"
+	"strings"
 	"time"
 	_ "time/tzdata" // event time zones must not depend on the host's zoneinfo
 
@@ -49,16 +50,24 @@ func (p *pdf) check(err error) {
 	}
 }
 
-// Drawing stops at the first error: gopdf panics if asked to draw text in a
-// font that failed to load.
-func (p *pdf) text(font string, size float64, gray uint8, y float64, s string) {
+// text draws s left-aligned from y, wrapped to the page width, and returns
+// the y below it so the layout flows when a long title wraps. Drawing stops
+// at the first error: gopdf panics if asked to draw in a font that failed to load.
+func (p *pdf) text(font string, size float64, gray uint8, y float64, s string) float64 {
 	if p.err != nil {
-		return
+		return y
 	}
 	p.check(p.g.SetFont(font, "", size))
 	p.g.SetTextColor(gray, gray, gray)
-	p.g.SetXY(margin, y)
-	p.check(p.g.MultiCell(&gopdf.Rect{W: pageW - 2*margin, H: size * 1.3}, s))
+	lines, err := p.g.SplitText(s, pageW-2*margin)
+	p.check(err)
+	lh := size * 1.35
+	for _, line := range lines {
+		p.g.SetXY(margin, y)
+		p.check(p.g.Cell(&gopdf.Rect{W: pageW - 2*margin, H: lh}, strings.TrimSpace(line)))
+		y += lh
+	}
+	return y
 }
 
 func (p *pdf) centered(font string, size float64, y float64, s string) {
@@ -106,18 +115,19 @@ func Render(d Doc) ([]byte, error) {
 	p.check(p.g.AddTTFFontData("regular", fontRegular))
 	p.check(p.g.AddTTFFontData("bold", fontBold))
 
-	p.text("regular", 10, 90, 36, d.Organizer)
-	p.text("bold", 20, 0, 54, d.EventTitle)
-	p.text("regular", 11, 0, 110, d.StartsAt.In(loc).Format("Monday 2 January 2006, 15:04 MST"))
-	p.text("regular", 11, 0, 128, d.Venue)
-	p.text("bold", 12, 0, 152, fmt.Sprintf("%s · Ticket %d of %d", d.TicketType, d.Ordinal, d.Of))
+	y := p.text("regular", 10, 90, 34, d.Organizer)
+	y = p.text("bold", 20, 0, y+2, d.EventTitle)
+	y = p.text("regular", 11, 0, y+6, d.StartsAt.In(loc).Format("Monday 2 January 2006, 15:04 MST"))
+	y = p.text("regular", 11, 0, y, d.Venue)
+	y = p.text("bold", 12, 0, y+8, fmt.Sprintf("%s · Ticket %d of %d", d.TicketType, d.Ordinal, d.Of))
 
-	p.image(qr, (pageW-qrSize)/2, 180, qrSize)
-
-	p.centered("regular", 9, 420, "Code for manual entry")
-	p.centered("bold", 17, 434, d.FallbackCode)
-	p.centered("regular", 9, 462, "Order "+d.OrderRef)
-	p.text("regular", 9, 70, 500, "Show this code at the entrance. Each ticket admits one person, once. "+
+	y += 10
+	p.image(qr, (pageW-qrSize)/2, y, qrSize)
+	y += qrSize + 8
+	p.centered("regular", 9, y, "Code for manual entry")
+	p.centered("bold", 17, y+13, d.FallbackCode)
+	p.centered("regular", 9, y+40, "Order "+d.OrderRef)
+	p.text("regular", 9, 70, y+64, "Show this code at the entrance. Each ticket admits one person, once. "+
 		"Keep it private: the first person to present it is admitted.")
 
 	if p.err != nil {

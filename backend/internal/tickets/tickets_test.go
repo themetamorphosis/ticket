@@ -2,9 +2,11 @@ package tickets
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
 	"crypto/rand"
 	"errors"
+	"io"
 	"regexp"
 	"strings"
 	"testing"
@@ -149,6 +151,17 @@ func TestRenderProducesASinglePagePDF(t *testing.T) {
 	if bytes.Contains(pdf, []byte("a@example.com")) {
 		t.Fatal("contact details on the ticket")
 	}
+	// Every line of text is drawn: organizer, title, date, venue, ticket
+	// line, three centered lines and the two-line footer at least.
+	if n := textOps(t, pdf); n < 10 {
+		t.Fatalf("only %d text drawing operations", n)
+	}
+	long := d
+	long.EventTitle = strings.Repeat("A very long concert title ", 6)
+	longPDF, _ := Render(long)
+	if textOps(t, longPDF) <= textOps(t, pdf) {
+		t.Fatal("long title did not wrap onto more lines")
+	}
 	if d.FileName() != "ticket-2-of-3.pdf" {
 		t.Fatal(d.FileName())
 	}
@@ -252,4 +265,23 @@ func TestIssueInTx(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("%d tickets", n)
 	}
+}
+
+// textOps inflates the PDF's content streams and counts text-show operators.
+func textOps(t *testing.T, pdf []byte) int {
+	t.Helper()
+	n := 0
+	for _, part := range bytes.Split(pdf, []byte(">>\nstream\n"))[1:] {
+		end := bytes.Index(part, []byte("endstream"))
+		if end < 0 {
+			continue
+		}
+		r, err := zlib.NewReader(bytes.NewReader(part[:end]))
+		if err != nil {
+			continue // not a Flate stream (fonts, images)
+		}
+		content, _ := io.ReadAll(r)
+		n += bytes.Count(content, []byte(" Tj")) + bytes.Count(content, []byte(" TJ"))
+	}
+	return n
 }
