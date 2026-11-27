@@ -105,7 +105,22 @@ ALTER TABLE event ADD COLUMN admission_closes_at timestamptz;
 ALTER TABLE ticket DROP CONSTRAINT ticket_status_check;
 ALTER TABLE ticket ADD CONSTRAINT ticket_status_check CHECK (status IN ('valid', 'used', 'void', 'refund_pending'));
 
+-- An order whose refund was approved: its money is accounted to the refund,
+-- not to sales, from the moment of approval.
+ALTER TABLE ticket_order DROP CONSTRAINT ticket_order_status_check;
+ALTER TABLE ticket_order ADD CONSTRAINT ticket_order_status_check
+    CHECK (status IN ('held', 'expired', 'cancelled', 'paid', 'refunded'));
+
+-- Organizer-approved refunds (finance), alongside the automatic ones.
+ALTER TABLE refund DROP CONSTRAINT refund_reason_check;
+ALTER TABLE refund ADD CONSTRAINT refund_reason_check CHECK (reason IN ('late_payment', 'duplicate_charge', 'organizer'));
+
 -- +goose Down
+ALTER TABLE ticket_order DROP CONSTRAINT ticket_order_status_check;
+ALTER TABLE ticket_order ADD CONSTRAINT ticket_order_status_check
+    CHECK (status IN ('held', 'expired', 'cancelled', 'paid'));
+ALTER TABLE refund DROP CONSTRAINT refund_reason_check;
+ALTER TABLE refund ADD CONSTRAINT refund_reason_check CHECK (reason IN ('late_payment', 'duplicate_charge'));
 ALTER TABLE ticket DROP CONSTRAINT ticket_status_check;
 ALTER TABLE ticket ADD CONSTRAINT ticket_status_check CHECK (status IN ('valid', 'used', 'void'));
 ALTER TABLE event DROP COLUMN admission_closes_at;

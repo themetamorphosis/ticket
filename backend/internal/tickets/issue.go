@@ -73,3 +73,17 @@ func (i *Issuer) Open(data []byte) (Secrets, error) {
 func (i *Issuer) IssueInTx(ctx context.Context, tx pgx.Tx, orderID string) error {
 	return i.Issue(ctx, tx, orderID)
 }
+
+// Reseal gives a ticket new secrets and the next credential version, inside
+// the caller's transaction (which holds the ticket row lock). The previous QR
+// credential and fallback code stop matching at once.
+func (i *Issuer) Reseal(ctx context.Context, tx dbx.DB, ticketID string) (int, error) {
+	s := sealed{Credential: NewCredential(), Fallback: NewFallbackCode()}
+	norm, _ := NormalizeFallback(s.Fallback)
+	plain, _ := json.Marshal(s)
+	var version int
+	err := tx.QueryRow(ctx, `UPDATE ticket SET credential_digest = $2, fallback_digest = $3, credential_sealed = $4,
+			credential_version = credential_version + 1
+		WHERE id = $1 RETURNING credential_version`, ticketID, Digest(s.Credential), Digest(norm), i.Box.Seal(plain)).Scan(&version)
+	return version, err
+}

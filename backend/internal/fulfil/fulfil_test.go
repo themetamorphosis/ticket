@@ -23,6 +23,7 @@ import (
 	"kacheem/backend/internal/payments/fakegw"
 	"kacheem/backend/internal/pgtest"
 	"kacheem/backend/internal/sealbox"
+	"kacheem/backend/internal/ticketops"
 	"kacheem/backend/internal/tickets"
 )
 
@@ -311,4 +312,30 @@ func TestDeliveriesShowsLatestPerChannel(t *testing.T) {
 		t.Fatalf("%+v %v", d, err)
 	}
 	pgtest.EachFault(t, e.pool, func(db dbx.DB) error { _, err := Deliveries(ctx, db, oid); return err }, func(int, error) {})
+}
+
+func TestReissuedTicketIsRenderedAndDeliveredAgain(t *testing.T) {
+	e := setup(t)
+	oid := e.pay("buyer-1", 2)
+	e.drain()
+	var staffID, ticketID string
+	_ = e.pool.QueryRow(ctx, `INSERT INTO staff (email, name, role) VALUES ('s@example.org', 'Support', 'support') RETURNING id`).Scan(&staffID)
+	_ = e.pool.QueryRow(ctx, `SELECT id FROM ticket WHERE order_id = $1 AND ordinal = 2`, oid).Scan(&ticketID)
+	if err := ticketops.Reissue(ctx, e.pool, e.f.Issuer, staffID, ticketID, "lost phone"); err != nil {
+		t.Fatal(err)
+	}
+	e.drain()
+	if len(e.out.emails) != 2 || len(e.out.sms) != 2 || e.count(`SELECT count(*) FROM ticket_document WHERE ticket_id = $1`, ticketID) != 2 {
+		t.Fatalf("%d emails %d sms", len(e.out.emails), len(e.out.sms))
+	}
+	// The resent email carries the new version of ticket 2.
+	if string(e.out.emails[1].Attachments[1].Data) == string(e.out.emails[0].Attachments[1].Data) {
+		t.Fatal("resent the old PDF")
+	}
+	// Running the render job again sends nothing new.
+	_ = outbox.Enqueue(ctx, e.pool, "render_tickets", oid, oid+":again")
+	e.drain()
+	if len(e.out.emails) != 2 {
+		t.Fatalf("%d emails after a repeated render", len(e.out.emails))
+	}
 }

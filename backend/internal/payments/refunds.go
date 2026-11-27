@@ -47,8 +47,16 @@ func (s *Service) ProcessRefunds(ctx context.Context, limit int) (int, error) {
 		if err != nil {
 			res = RefundResult{Status: RefundPending, Detail: err.Error()}
 		}
-		if _, err := s.DB.Exec(ctx, `UPDATE refund SET status = $2, provider_refund_id = nullif($3, ''),
-			last_error = nullif($4, ''), updated_at = now() WHERE id = $1`,
+		// A settled organizer refund voids the tickets it blocked.
+		if _, err := s.DB.Exec(ctx, `
+			WITH r AS (
+				UPDATE refund SET status = $2, provider_refund_id = nullif($3, ''),
+					last_error = nullif($4, ''), updated_at = now() WHERE id = $1
+				RETURNING attempt_id, status, reason
+			)
+			UPDATE ticket t SET status = 'void'
+			FROM r JOIN payment_attempt a ON a.id = r.attempt_id
+			WHERE r.status = 'completed' AND r.reason = 'organizer' AND t.order_id = a.order_id AND t.status = 'refund_pending'`,
 			r.ID, string(res.Status), res.ProviderRefundID, res.Detail); err != nil {
 			return i, err
 		}

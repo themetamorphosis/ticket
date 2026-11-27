@@ -118,7 +118,9 @@ func (f *Fulfiller) render(ctx context.Context, orderID string) error {
 	if err != nil {
 		return err
 	}
+	versions := 0
 	for _, t := range rows {
+		versions += t.Version
 		if t.Rendered {
 			continue
 		}
@@ -140,7 +142,9 @@ func (f *Fulfiller) render(ctx context.Context, orderID string) error {
 			return err
 		}
 	}
-	return queueDelivery(ctx, f.DB, orderID, "initial")
+	// Keyed by the credential versions: a repeated render sends nothing new,
+	// but a reissued ticket (a higher version) is delivered again.
+	return queueDelivery(ctx, f.DB, orderID, fmt.Sprintf("docs-%d", versions))
 }
 
 func queueDelivery(ctx context.Context, db dbx.DB, orderID, tag string) error {
