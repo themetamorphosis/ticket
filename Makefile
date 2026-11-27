@@ -23,7 +23,7 @@ GO := $(DOCKER_RUN) -w /repo/backend \
 NODE := $(DOCKER_RUN) -w /repo/web -e npm_config_cache=/repo/.cache/npm \
 	-e NEXT_TELEMETRY_DISABLED=1 $(NODE_IMAGE)
 
-.PHONY: help up down reset cache seed publish-dev app-up app-down \
+.PHONY: help up down reset cache seed publish-dev app-up app-down staff-invite \
 	go-fmt go-fmt-fix go-vet go-test go-cover go-build go-vulncheck migrate \
 	web-install web-lint web-test web-build \
 	no-pragmas verify verify-go verify-web
@@ -82,6 +82,11 @@ publish-dev: cache ## Publish the development event into .cache/site/event.json
 app-up: seed publish-dev web-build ## Run the buyer site locally at http://localhost:8088
 	UIDGID=$(UIDGID) docker compose --profile app up -d --wait api worker web
 	@echo "Buyer site: http://localhost:$${WEB_HOST_PORT:-8088}/"
+	@echo "Staff site: http://localhost:$${STAFF_HOST_PORT:-8089}/ (first organizer: make staff-invite EMAIL=... NAME=... ROLE=organizer)"
+
+staff-invite: cache ## Print a staff invite link: make staff-invite EMAIL=a@b.org NAME="A B" ROLE=organizer
+	$(GO) env GATE_ORIGIN="http://localhost:$${STAFF_HOST_PORT:-8089}" \
+		go run ./cmd/staff invite "$(EMAIL)" "$(NAME)" "$(ROLE)"
 
 app-down: ## Stop the local application stack (keeps data)
 	docker compose --profile app stop api worker web
