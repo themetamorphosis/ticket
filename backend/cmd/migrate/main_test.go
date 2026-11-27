@@ -23,8 +23,9 @@ func TestUpStatusDown(t *testing.T) {
 	env := getter(map[string]string{"DATABASE_URL": pgtest.NewDatabase(t)})
 	steps := []struct{ cmd, want string }{
 		{"status", "pending  00001_audit_event.sql"},
-		{"up", "OK    up 00002_reservations.sql"},
-		{"status", "applied  00002_reservations.sql"},
+		{"up", "OK    up 00003_payments.sql"},
+		{"status", "applied  00003_payments.sql"},
+		{"down", "OK    down 00003_payments.sql"},
 		{"down", "OK    down 00002_reservations.sql"},
 		{"down", "OK    down 00001_audit_event.sql"},
 	}

@@ -303,34 +303,53 @@ func lockChosen(ctx context.Context, tx pgx.Tx, freeSQL, tierID string, qty int)
 
 var errNoop = errors.New("nothing to release")
 
+// LockedOrder is an order's state read under LockOrder's locks.
+type LockedOrder struct {
+	Status  string `db:"status"`
+	Expired bool   `db:"expired"`
+}
+
+// LockOrder takes the locks every order transition needs, in the one global
+// order: the order's inventory shards ascending, then the order row. Call it
+// first inside the transaction, then decide using the returned state.
+func LockOrder(ctx context.Context, tx pgx.Tx, orderID string) (LockedOrder, error) {
+	if _, err := tx.Exec(ctx, `
+		SELECT 1 FROM inventory_shard s
+		JOIN hold h ON h.ticket_type_id = s.ticket_type_id AND h.shard = s.shard
+		WHERE h.order_id = $1 ORDER BY s.ticket_type_id, s.shard FOR UPDATE OF s`, orderID); err != nil {
+		return LockedOrder{}, err
+	}
+	return dbx.One[LockedOrder](ctx, tx,
+		`SELECT status, expires_at <= now() AS expired FROM ticket_order WHERE id = $1 FOR UPDATE`, orderID)
+}
+
+// SettleHold ends a held order under LockOrder's locks: its places become
+// sold (sold=true, status "paid") or return to stock (sold=false, status
+// "expired" or "cancelled"). The caller has checked the order is still held.
+func SettleHold(ctx context.Context, tx pgx.Tx, orderID, to string, sold bool) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE inventory_shard s
+		SET held = s.held - h.quantity, sold = s.sold + CASE WHEN $2 THEN h.quantity ELSE 0 END
+		FROM hold h
+		WHERE h.order_id = $1 AND s.ticket_type_id = h.ticket_type_id AND s.shard = h.shard`, orderID, sold); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `UPDATE ticket_order SET status = $2, closed_at = now() WHERE id = $1`, orderID, to)
+	return err
+}
+
 // release moves a held order to status `to` and returns its places to stock,
 // exactly once. With onlyIfExpired it does nothing to a hold that is still live.
 func release(ctx context.Context, db dbx.DB, orderID, to string, onlyIfExpired bool) (bool, error) {
 	err := dbx.InTx(ctx, db, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `
-			SELECT 1 FROM inventory_shard s
-			JOIN hold h ON h.ticket_type_id = s.ticket_type_id AND h.shard = s.shard
-			WHERE h.order_id = $1 ORDER BY s.ticket_type_id, s.shard FOR UPDATE OF s`, orderID); err != nil {
-			return err
-		}
-		cur, err := dbx.One[struct {
-			Status  string `db:"status"`
-			Expired bool   `db:"expired"`
-		}](ctx, tx, `SELECT status, expires_at <= now() AS expired FROM ticket_order WHERE id = $1 FOR UPDATE`, orderID)
+		cur, err := LockOrder(ctx, tx, orderID)
 		if err != nil {
 			return err
 		}
 		if cur.Status != "held" || (onlyIfExpired && !cur.Expired) {
 			return errNoop
 		}
-		if _, err := tx.Exec(ctx, `
-			UPDATE inventory_shard s SET held = s.held - h.quantity
-			FROM hold h
-			WHERE h.order_id = $1 AND s.ticket_type_id = h.ticket_type_id AND s.shard = h.shard`, orderID); err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `UPDATE ticket_order SET status = $2, closed_at = now() WHERE id = $1`, orderID, to)
-		return err
+		return SettleHold(ctx, tx, orderID, to, false)
 	})
 	if errors.Is(err, errNoop) {
 		return false, nil

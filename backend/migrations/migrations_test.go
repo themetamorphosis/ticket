@@ -186,3 +186,47 @@ func TestOrderLinesAndHoldsAreImmutable(t *testing.T) {
 		t.Fatalf("second active hold: err = %v", err)
 	}
 }
+
+func TestPaymentTablesGuardTheirInvariants(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	ids := pgtest.CreateEvent(t, pool, pgtest.Event{Slug: "pay", Shards: []int32{5}})
+	var orderID, attemptID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO ticket_order (public_ref, event_id, buyer_id, idempotency_key, request_digest,
+			purchaser_name, email, phone, age, currency, total_minor, expires_at)
+		VALUES ('ABCDE-FGHJK', $1, 'buyer', 'key-12345', decode(repeat('00', 32), 'hex'),
+			'A Buyer', 'a@example.com', '+8801711000000', 30, 'BDT', 155000, now() + interval '10 minutes')
+		RETURNING id`, ids.EventID).Scan(&orderID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO payment_attempt (merchant_ref, order_id, provider, amount_minor, currency)
+		VALUES ('PAY-0000001', $1, 'bkash', 155000, 'BDT') RETURNING id`, orderID).Scan(&attemptID); err != nil {
+		t.Fatal(err)
+	}
+	mustFail := func(name, sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	mustFail("succeeded without trx id", `UPDATE payment_attempt SET status = 'succeeded' WHERE id = $1`, attemptID)
+	mustFail("unknown status", `UPDATE payment_attempt SET status = 'maybe' WHERE id = $1`, attemptID)
+	mustFail("bad provider name", `UPDATE payment_attempt SET provider = 'B Kash' WHERE id = $1`, attemptID)
+
+	if _, err := pool.Exec(ctx, `INSERT INTO payment_event (attempt_id, kind) VALUES ($1, 'started')`, attemptID); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{`UPDATE payment_event SET kind = 'x'`, `DELETE FROM payment_event`} {
+		if _, err := pool.Exec(ctx, s); err == nil || !strings.Contains(err.Error(), "append-only") {
+			t.Errorf("%s: err = %v", s, err)
+		}
+	}
+	mustFail("completed refund without provider id", `
+		INSERT INTO refund (refund_ref, attempt_id, amount_minor, currency, reason, status)
+		VALUES ('RF-1', $1, 100, 'BDT', 'late_payment', 'completed')`, attemptID)
+	mustFail("zero refund", `
+		INSERT INTO refund (refund_ref, attempt_id, amount_minor, currency, reason)
+		VALUES ('RF-2', $1, 0, 'BDT', 'late_payment')`, attemptID)
+}
