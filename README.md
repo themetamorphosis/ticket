@@ -28,6 +28,11 @@ make verify
 `make help` lists every target. `make up` starts PostgreSQL 17 and Redis 8,
 `make migrate` applies the schema, and `make reset` deletes the local data.
 
+To try the buyer site locally, run `make app-up` and open
+http://localhost:8088/. It seeds a development event, publishes its
+`event.json`, builds the static export and starts the Go API, the worker and
+NGINX with production-style routing. `make app-down` stops the stack.
+
 If ports 5432 or 6379 are already taken on your machine, copy `.env.example` to
 `.env` and change `DB_HOST_PORT` and `REDIS_HOST_PORT`. The tests talk to the
 services inside the Compose network, so host ports never affect them.

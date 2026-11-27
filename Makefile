@@ -23,7 +23,7 @@ GO := $(DOCKER_RUN) -w /repo/backend \
 NODE := $(DOCKER_RUN) -w /repo/web -e npm_config_cache=/repo/.cache/npm \
 	-e NEXT_TELEMETRY_DISABLED=1 $(NODE_IMAGE)
 
-.PHONY: help up down reset cache \
+.PHONY: help up down reset cache seed publish-dev app-up app-down \
 	go-fmt go-fmt-fix go-vet go-test go-cover go-build go-vulncheck migrate \
 	web-install web-lint web-test web-build \
 	no-pragmas verify verify-go verify-web
@@ -71,6 +71,20 @@ go-vulncheck: cache
 
 migrate: cache up ## Apply migrations to the local database
 	$(GO) go run ./cmd/migrate up
+
+seed: migrate ## Load the development event (idempotent)
+	docker compose exec -T db psql -v ON_ERROR_STOP=1 -U app -d tickets < backend/seed/dev.sql
+
+publish-dev: cache ## Publish the development event into .cache/site/event.json
+	@mkdir -p .cache/site
+	$(GO) sh -c 'PUBLISH_DIR=/repo/.cache/site go run ./cmd/publish kacheem-live'
+
+app-up: seed publish-dev web-build ## Run the buyer site locally at http://localhost:8088
+	UIDGID=$(UIDGID) docker compose --profile app up -d --wait api worker web
+	@echo "Buyer site: http://localhost:$${WEB_HOST_PORT:-8088}/"
+
+app-down: ## Stop the local application stack (keeps data)
+	docker compose --profile app stop api worker web
 
 # ---------- Web ----------
 
