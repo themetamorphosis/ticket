@@ -33,7 +33,8 @@ func newPublic(checks []Check) http.Handler {
 }
 
 func handlers(checks ...Check) map[string]http.Handler {
-	return map[string]http.Handler{"public": newPublic(checks), "staff": NewStaff(checks)}
+	return map[string]http.Handler{"public": newPublic(checks),
+		"staff": NewStaff(StaffDeps{Sessions: scs.New(), Checks: checks, Logger: slog.New(slog.DiscardHandler)})}
 }
 
 func TestHealth(t *testing.T) {

@@ -137,3 +137,18 @@ func CanSee(m *scs.SessionManager, r *http.Request, orderID, orderBuyerID string
 	}
 	return false
 }
+
+// StaffCookie is the staff session cookie, host-only on the staff origin.
+const StaffCookie = "kc_staff"
+
+// NewStaff returns the staff session manager: stricter than the buyer's
+// (SameSite=Strict, a 12-hour lifetime and a 2-hour idle timeout).
+func NewStaff(pool *pgxpool.Pool, cleanup time.Duration, onError func(http.ResponseWriter, *http.Request, error)) *scs.SessionManager {
+	m := NewBuyer(pool, cleanup, onError)
+	m.Store = pgxstore.NewWithConfig(pool, pgxstore.Config{TableName: "staff_session", CleanUpInterval: cleanup})
+	m.Lifetime = 12 * time.Hour
+	m.IdleTimeout = 2 * time.Hour
+	m.Cookie.Name = StaffCookie
+	m.Cookie.SameSite = http.SameSiteStrictMode
+	return m
+}

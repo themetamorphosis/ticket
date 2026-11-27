@@ -8,12 +8,15 @@ import (
 	"path/filepath"
 	"testing"
 
+	"kacheem/backend/internal/audit"
 	"kacheem/backend/internal/catalog"
 	"kacheem/backend/internal/dbx"
 	"kacheem/backend/internal/pgtest"
 )
 
 var ctx = context.Background()
+
+var sys = audit.Actor{Kind: "system"}
 
 func read(t *testing.T, path string) Snapshot {
 	t.Helper()
@@ -33,7 +36,7 @@ func TestPublishWritesVersionedSnapshotAndSwitchesCurrent(t *testing.T) {
 	pgtest.CreateEvent(t, pool, pgtest.Event{Slug: "live", Status: "draft", MaxPerOrder: 6})
 	dir := t.TempDir()
 
-	snap, err := Publish(ctx, pool, "live", dir)
+	snap, err := Publish(ctx, pool, sys, "live", dir)
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -59,7 +62,7 @@ func TestPublishWritesVersionedSnapshotAndSwitchesCurrent(t *testing.T) {
 
 	// Republishing bumps the revision and keeps the earlier revision on disk.
 	_, _ = pool.Exec(ctx, `UPDATE event SET title = 'Renamed Concert' WHERE slug = 'live'`)
-	if _, err := Publish(ctx, pool, "live", dir); err != nil {
+	if _, err := Publish(ctx, pool, sys, "live", dir); err != nil {
 		t.Fatal(err)
 	}
 	if read(t, filepath.Join(dir, "event.json")).Event.Title != "Renamed Concert" ||
@@ -75,18 +78,18 @@ func TestPublishWritesVersionedSnapshotAndSwitchesCurrent(t *testing.T) {
 func TestPublishRejectsInvalidEvents(t *testing.T) {
 	pool := pgtest.Pool(t)
 	dir := t.TempDir()
-	if _, err := Publish(ctx, pool, "missing", dir); !errors.Is(err, catalog.ErrNotFound) {
+	if _, err := Publish(ctx, pool, sys, "missing", dir); !errors.Is(err, catalog.ErrNotFound) {
 		t.Fatalf("missing: %v", err)
 	}
 	pgtest.CreateEvent(t, pool, pgtest.Event{Slug: "badzone", Status: "draft"})
 	_, _ = pool.Exec(ctx, `UPDATE event SET time_zone = 'Mars/Olympus' WHERE slug = 'badzone'`)
-	if _, err := Publish(ctx, pool, "badzone", dir); !errors.Is(err, ErrInvalidEvent) {
+	if _, err := Publish(ctx, pool, sys, "badzone", dir); !errors.Is(err, ErrInvalidEvent) {
 		t.Fatalf("bad zone: %v", err)
 	}
 	pgtest.CreateEvent(t, pool, pgtest.Event{Slug: "twotiers", Status: "draft"})
 	_, _ = pool.Exec(ctx, `INSERT INTO ticket_type (event_id, name, price_minor, fee_minor, capacity)
 		SELECT id, 'VIP', 1, 0, 0 FROM event WHERE slug = 'twotiers'`)
-	if _, err := Publish(ctx, pool, "twotiers", dir); !errors.Is(err, ErrInvalidEvent) {
+	if _, err := Publish(ctx, pool, sys, "twotiers", dir); !errors.Is(err, ErrInvalidEvent) {
 		t.Fatalf("two tiers: %v", err)
 	}
 	if e, _ := catalog.GetEvent(ctx, pool, "badzone"); e.Status != "draft" || e.PublishedRevision != 0 {
@@ -101,7 +104,7 @@ func TestPublishWithoutDoorsTime(t *testing.T) {
 	pool := pgtest.Pool(t)
 	pgtest.CreateEvent(t, pool, pgtest.Event{Slug: "live"})
 	_, _ = pool.Exec(ctx, `UPDATE event SET doors_at = NULL`)
-	snap, err := Publish(ctx, pool, "live", t.TempDir())
+	snap, err := Publish(ctx, pool, sys, "live", t.TempDir())
 	if err != nil || snap.Event.DoorsAt != nil || snap.Revision != 2 {
 		t.Fatalf("snap %+v err %v", snap, err)
 	}
@@ -124,7 +127,7 @@ func TestFilesystemFailuresRollBackThePublish(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(blocked, "event.json", "occupied"), 0o755)
 
 	for name, dir := range map[string]string{"mkdir": notADir, "write": readOnly, "rename": blocked} {
-		if _, err := Publish(ctx, pool, "live", dir); err == nil {
+		if _, err := Publish(ctx, pool, sys, "live", dir); err == nil {
 			t.Errorf("%s: expected error", name)
 		}
 	}
@@ -138,7 +141,7 @@ func TestPublishDatabaseFailures(t *testing.T) {
 	pgtest.CreateEvent(t, pool, pgtest.Event{Slug: "live", Status: "draft"})
 	dir := t.TempDir()
 	pgtest.EachFault(t, pool, func(db dbx.DB) error {
-		_, err := Publish(ctx, db, "live", dir)
+		_, err := Publish(ctx, db, sys, "live", dir)
 		return err
 	}, func(int, error) {})
 	if e, _ := catalog.GetEvent(ctx, pool, "live"); e.PublishedRevision != 1 {

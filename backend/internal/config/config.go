@@ -27,6 +27,9 @@ type API struct {
 	ShutdownTimeout time.Duration
 	Payment         Payment
 	Delivery        Delivery
+	// PublishDir, if set, lets organizers publish event.json from the
+	// dashboard into this buyer web root.
+	PublishDir string
 }
 
 // Delivery configures ticket issuance and the email and SMS channels.
@@ -122,6 +125,7 @@ func LoadAPI(getenv func(string) string) (API, error) {
 		ShutdownTimeout: duration(getenv, "SHUTDOWN_TIMEOUT", DefaultShutdownTimeout, &errs),
 		Payment:         loadPayment(getenv, &errs),
 		Delivery:        loadDelivery(getenv, &errs),
+		PublishDir:      getenv("PUBLISH_DIR"),
 	}
 	return cfg, errors.Join(errs...)
 }

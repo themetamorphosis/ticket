@@ -89,6 +89,7 @@ func TestRunFailures(t *testing.T) {
 		"bad redis url":   func(m map[string]string) { m["REDIS_URL"] = "http://nope" },
 		"bad public addr": func(m map[string]string) { m["API_PUBLIC_LISTEN"] = "udp:1" },
 		"bad staff addr":  func(m map[string]string) { m["API_STAFF_LISTEN"] = "udp:1" },
+		"bad gate origin": func(m map[string]string) { m["GATE_ORIGIN"] = "::not a url" },
 	}
 	for name, mutate := range cases {
 		env := baseEnv(t)

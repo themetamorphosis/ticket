@@ -22,6 +22,7 @@ import (
 	"kacheem/backend/internal/sealbox"
 	"kacheem/backend/internal/server"
 	"kacheem/backend/internal/session"
+	"kacheem/backend/internal/staffauth"
 	"kacheem/backend/internal/tickets"
 )
 
@@ -73,6 +74,10 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	pay := &payments.Service{DB: pool, Gateway: gw, ReturnURL: cfg.PublicOrigin + "/payments/return/" + gw.Provider(),
 		// A paid order's tickets commit in the same transaction as its payment.
 		OnPaid: issuer.IssueInTx}
+	staffAuth, err := staffauth.New(pool, cfg.Delivery.GateOrigin)
+	if err != nil {
+		return err
+	}
 	var devOutbox http.Handler
 	if delivery.UsesDevChannels(cfg.Delivery) {
 		devOutbox = delivery.DevOutbox(pool)
@@ -90,7 +95,16 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 			FakeGatewayPage: fakePage,
 			DevOutbox:       devOutbox,
 		}), logger), Listener: public},
-		server.Endpoint{Server: server.New(httpapi.NewStaff(checks), logger), Listener: staff},
+		server.Endpoint{Server: server.New(httpapi.NewStaff(httpapi.StaffDeps{
+			DB:         pool,
+			Sessions:   session.NewStaff(pool, 30*time.Minute, httpapi.SessionError(logger)),
+			Origin:     cfg.Delivery.GateOrigin,
+			Auth:       staffAuth,
+			Issuer:     issuer,
+			PublishDir: cfg.PublishDir,
+			Checks:     checks,
+			Logger:     logger,
+		}), logger), Listener: staff},
 	)
 	logger.Info("api stopped")
 	return err

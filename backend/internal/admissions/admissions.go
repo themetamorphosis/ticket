@@ -214,9 +214,9 @@ func replay(ctx context.Context, tx pgx.Tx, s Scan) (Result, bool, error) {
 
 // Counts are live gate totals for the dashboard.
 type Counts struct {
-	Gate     string `db:"gate"`
-	Admitted int    `db:"admitted"`
-	Refused  int    `db:"refused"`
+	Gate     string `db:"gate" json:"gate"`
+	Admitted int    `db:"admitted" json:"admitted"`
+	Refused  int    `db:"refused" json:"refused"`
 }
 
 // GateCounts returns admissions and refusals per gate for an event.

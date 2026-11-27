@@ -23,37 +23,37 @@ var (
 
 // Tier is one ticket type. Money is in integer minor units.
 type Tier struct {
-	ID         string `db:"id"`
-	Name       string `db:"name"`
-	PriceMinor int64  `db:"price_minor"`
-	FeeMinor   int64  `db:"fee_minor"`
-	Capacity   int    `db:"capacity"`
+	ID         string `db:"id" json:"id"`
+	Name       string `db:"name" json:"name"`
+	PriceMinor int64  `db:"price_minor" json:"price_minor"`
+	FeeMinor   int64  `db:"fee_minor" json:"fee_minor"`
+	Capacity   int    `db:"capacity" json:"capacity"`
 }
 
 // Event is the full event record with its tiers.
 type Event struct {
-	ID                string     `db:"id"`
-	Slug              string     `db:"slug"`
-	Title             string     `db:"title"`
-	Organizer         string     `db:"organizer"`
-	VenueName         string     `db:"venue_name"`
-	VenueAddress      string     `db:"venue_address"`
-	Description       string     `db:"description"`
-	Lineup            []string   `db:"lineup"`
-	StartsAt          time.Time  `db:"starts_at"`
-	DoorsAt           *time.Time `db:"doors_at"`
-	TimeZone          string     `db:"time_zone"`
-	Currency          string     `db:"currency"`
-	Capacity          int        `db:"capacity"`
-	MaxPerOrder       int        `db:"max_per_order"`
-	MinAge            int        `db:"min_age"`
-	HoldMinutes       int        `db:"hold_minutes"`
-	SaleOpensAt       time.Time  `db:"sale_opens_at"`
-	SaleClosesAt      time.Time  `db:"sale_closes_at"`
-	Status            string     `db:"status"`
-	PublishedRevision int        `db:"published_revision"`
-	PublishedAt       *time.Time `db:"published_at"`
-	Tiers             []Tier     `db:"-"`
+	ID                string     `db:"id" json:"id"`
+	Slug              string     `db:"slug" json:"slug"`
+	Title             string     `db:"title" json:"title"`
+	Organizer         string     `db:"organizer" json:"organizer"`
+	VenueName         string     `db:"venue_name" json:"venue_name"`
+	VenueAddress      string     `db:"venue_address" json:"venue_address"`
+	Description       string     `db:"description" json:"description"`
+	Lineup            []string   `db:"lineup" json:"lineup"`
+	StartsAt          time.Time  `db:"starts_at" json:"starts_at"`
+	DoorsAt           *time.Time `db:"doors_at" json:"doors_at"`
+	TimeZone          string     `db:"time_zone" json:"time_zone"`
+	Currency          string     `db:"currency" json:"currency"`
+	Capacity          int        `db:"capacity" json:"capacity"`
+	MaxPerOrder       int        `db:"max_per_order" json:"max_per_order"`
+	MinAge            int        `db:"min_age" json:"min_age"`
+	HoldMinutes       int        `db:"hold_minutes" json:"hold_minutes"`
+	SaleOpensAt       time.Time  `db:"sale_opens_at" json:"sale_opens_at"`
+	SaleClosesAt      time.Time  `db:"sale_closes_at" json:"sale_closes_at"`
+	Status            string     `db:"status" json:"status"`
+	PublishedRevision int        `db:"published_revision" json:"published_revision"`
+	PublishedAt       *time.Time `db:"published_at" json:"published_at"`
+	Tiers             []Tier     `db:"-" json:"-"`
 }
 
 const eventColumns = `id::text, slug, title, organizer, venue_name, venue_address, description, lineup,

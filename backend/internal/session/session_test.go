@@ -167,3 +167,19 @@ func TestAddPickupReportsRenewFailure(t *testing.T) {
 		t.Fatal("renewal failure not reported")
 	}
 }
+
+func TestStaffSessionsAreStricterAndSeparate(t *testing.T) {
+	pool := pgtest.Pool(t)
+	m := session.NewStaff(pool, 0, nil)
+	if m.Cookie.Name != session.StaffCookie || m.Cookie.SameSite != http.SameSiteStrictMode || !m.Cookie.Secure ||
+		m.IdleTimeout != 2*time.Hour || m.Lifetime != 12*time.Hour {
+		t.Fatalf("cookie %+v", m.Cookie)
+	}
+	h := m.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { session.Ensure(m, r) }))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	var staffRows, buyerRows int
+	_ = pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM staff_session), (SELECT count(*) FROM buyer_session)`).Scan(&staffRows, &buyerRows)
+	if staffRows != 1 || buyerRows != 0 {
+		t.Fatalf("staff %d buyer %d", staffRows, buyerRows)
+	}
+}

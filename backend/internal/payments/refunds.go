@@ -67,12 +67,12 @@ func (s *Service) ProcessRefunds(ctx context.Context, limit int) (int, error) {
 // Ledger is the internal money position finance reconciles against the
 // provider's settlement report.
 type Ledger struct {
-	CapturedMinor     int64 `db:"captured"`
-	PaidOrdersMinor   int64 `db:"paid_orders"`
-	ReviewMinor       int64 `db:"review"`
-	RefundedMinor     int64 `db:"refunded"`
-	RefundOpenMinor   int64 `db:"refund_open"`
-	RefundFailedMinor int64 `db:"refund_failed"`
+	CapturedMinor     int64 `db:"captured" json:"captured_minor"`
+	PaidOrdersMinor   int64 `db:"paid_orders" json:"paid_orders_minor"`
+	ReviewMinor       int64 `db:"review" json:"review_minor"`
+	RefundedMinor     int64 `db:"refunded" json:"refunded_minor"`
+	RefundOpenMinor   int64 `db:"refund_open" json:"refund_open_minor"`
+	RefundFailedMinor int64 `db:"refund_failed" json:"refund_failed_minor"`
 }
 
 // Balanced reports whether every captured taka is accounted for: sold

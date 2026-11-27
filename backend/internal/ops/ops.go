@@ -20,18 +20,18 @@ var ErrNotFound = errors.New("ops: not found")
 
 // Summary is the live sales picture for one event.
 type Summary struct {
-	EventID        string `db:"event_id"`
-	Title          string `db:"title"`
-	Status         string `db:"status"`
-	Revision       int    `db:"published_revision"`
-	Capacity       int    `db:"capacity"`
-	Sold           int    `db:"sold"`
-	Held           int    `db:"held"`
-	PaidOrders     int    `db:"paid_orders"`
-	RevenueMinor   int64  `db:"revenue_minor"`
-	Currency       string `db:"currency"`
-	Admitted       int    `db:"admitted"`
-	FailedDelivery int    `db:"failed_delivery"`
+	EventID        string `db:"event_id" json:"event_id"`
+	Title          string `db:"title" json:"title"`
+	Status         string `db:"status" json:"status"`
+	Revision       int    `db:"published_revision" json:"published_revision"`
+	Capacity       int    `db:"capacity" json:"capacity"`
+	Sold           int    `db:"sold" json:"sold"`
+	Held           int    `db:"held" json:"held"`
+	PaidOrders     int    `db:"paid_orders" json:"paid_orders"`
+	RevenueMinor   int64  `db:"revenue_minor" json:"revenue_minor"`
+	Currency       string `db:"currency" json:"currency"`
+	Admitted       int    `db:"admitted" json:"admitted"`
+	FailedDelivery int    `db:"failed_delivery" json:"failed_delivery"`
 }
 
 // GetSummary returns the summary for the event with this slug.
@@ -54,15 +54,15 @@ func GetSummary(ctx context.Context, db dbx.DB, slug string) (Summary, error) {
 
 // OrderRow is one search result.
 type OrderRow struct {
-	Ref        string    `db:"public_ref"`
-	Status     string    `db:"status"`
-	Name       string    `db:"purchaser_name"`
-	Email      string    `db:"email"`
-	Phone      string    `db:"phone"`
-	Quantity   int       `db:"quantity"`
-	TotalMinor int64     `db:"total_minor"`
-	Currency   string    `db:"currency"`
-	CreatedAt  time.Time `db:"created_at"`
+	Ref        string    `db:"public_ref" json:"public_ref"`
+	Status     string    `db:"status" json:"status"`
+	Name       string    `db:"purchaser_name" json:"purchaser_name"`
+	Email      string    `db:"email" json:"email"`
+	Phone      string    `db:"phone" json:"phone"`
+	Quantity   int       `db:"quantity" json:"quantity"`
+	TotalMinor int64     `db:"total_minor" json:"total_minor"`
+	Currency   string    `db:"currency" json:"currency"`
+	CreatedAt  time.Time `db:"created_at" json:"created_at"`
 }
 
 // Mask hides most of an email or phone number, for roles that only need to
@@ -102,29 +102,29 @@ func Search(ctx context.Context, db dbx.DB, query string, unmasked bool) ([]Orde
 
 // TicketRow is a ticket with its admission, for the order detail.
 type TicketRow struct {
-	ID         string     `db:"id"`
-	Ordinal    int        `db:"ordinal"`
-	Status     string     `db:"status"`
-	Version    int        `db:"credential_version"`
-	AdmittedAt *time.Time `db:"admitted_at"`
-	Gate       *string    `db:"gate"`
+	ID         string     `db:"id" json:"id"`
+	Ordinal    int        `db:"ordinal" json:"ordinal"`
+	Status     string     `db:"status" json:"status"`
+	Version    int        `db:"credential_version" json:"credential_version"`
+	AdmittedAt *time.Time `db:"admitted_at" json:"admitted_at"`
+	Gate       *string    `db:"gate" json:"gate"`
 }
 
 // AttemptRow is a payment attempt.
 type AttemptRow struct {
-	Provider  string    `db:"provider"`
-	Status    string    `db:"status"`
-	Amount    int64     `db:"amount_minor"`
-	TrxID     *string   `db:"provider_trx_id"`
-	CreatedAt time.Time `db:"created_at"`
+	Provider  string    `db:"provider" json:"provider"`
+	Status    string    `db:"status" json:"status"`
+	Amount    int64     `db:"amount_minor" json:"amount_minor"`
+	TrxID     *string   `db:"provider_trx_id" json:"provider_trx_id"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
 // RefundRow is a refund.
 type RefundRow struct {
-	Reason    string  `db:"reason"`
-	Status    string  `db:"status"`
-	Amount    int64   `db:"amount_minor"`
-	LastError *string `db:"last_error"`
+	Reason    string  `db:"reason" json:"reason"`
+	Status    string  `db:"status" json:"status"`
+	Amount    int64   `db:"amount_minor" json:"amount_minor"`
+	LastError *string `db:"last_error" json:"last_error"`
 }
 
 // Detail is everything about one order for support and finance.
@@ -178,12 +178,12 @@ func GetDetail(ctx context.Context, db dbx.DB, ref string, unmasked bool) (Detai
 
 // FinanceItem is a payment or refund that needs finance.
 type FinanceItem struct {
-	Kind      string    `db:"kind"`
-	OrderRef  string    `db:"public_ref"`
-	Status    string    `db:"status"`
-	Amount    int64     `db:"amount_minor"`
-	Detail    string    `db:"detail"`
-	UpdatedAt time.Time `db:"updated_at"`
+	Kind      string    `db:"kind" json:"kind"`
+	OrderRef  string    `db:"public_ref" json:"public_ref"`
+	Status    string    `db:"status" json:"status"`
+	Amount    int64     `db:"amount_minor" json:"amount_minor"`
+	Detail    string    `db:"detail" json:"detail"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // FinanceQueue lists captured payments under review and refunds that are
@@ -202,9 +202,9 @@ func FinanceQueue(ctx context.Context, db dbx.DB) ([]FinanceItem, error) {
 
 // Gate is a gate with the staff assigned to it.
 type Gate struct {
-	ID    string   `db:"id"`
-	Name  string   `db:"name"`
-	Staff []string `db:"staff"`
+	ID    string   `db:"id" json:"id"`
+	Name  string   `db:"name" json:"name"`
+	Staff []string `db:"staff" json:"staff"`
 }
 
 // Gates lists an event's gates and who may scan at each.

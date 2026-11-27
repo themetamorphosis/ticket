@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"kacheem/backend/internal/audit"
 	"kacheem/backend/internal/catalog"
 	"kacheem/backend/internal/dbx"
 )
@@ -67,7 +68,7 @@ type TicketType struct {
 // always being served. If that final commit fails, event.json may already show
 // the new content under the next revision number; the publish reports an
 // error and publishing again overwrites it consistently.
-func Publish(ctx context.Context, db dbx.DB, slug, dir string) (Snapshot, error) {
+func Publish(ctx context.Context, db dbx.DB, actor audit.Actor, slug, dir string) (Snapshot, error) {
 	var snap Snapshot
 	err := dbx.InTx(ctx, db, func(tx pgx.Tx) error {
 		var rev int
@@ -96,6 +97,9 @@ func Publish(ctx context.Context, db dbx.DB, slug, dir string) (Snapshot, error)
 			return err
 		}
 		snap.PublishedAt = snap.PublishedAt.UTC()
+		if err := audit.Record(ctx, tx, actor, "event.publish", "event", e.ID, "", map[string]any{"revision": snap.Revision}); err != nil {
+			return err
+		}
 		snap.Event = Event{
 			Slug: e.Slug, Title: e.Title, Organizer: e.Organizer,
 			Venue:       Venue{Name: e.VenueName, Address: e.VenueAddress},

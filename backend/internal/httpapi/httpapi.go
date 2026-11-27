@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -23,12 +24,6 @@ type Check struct {
 	Fn   func(context.Context) error
 }
 
-// NewStaff returns the handler for the VPN-only staff listener.
-func NewStaff(checks []Check) http.Handler {
-	mux := baseMux(checks)
-	return withDefaults(mux)
-}
-
 func baseMux(checks []Check) *http.ServeMux {
 	mux := http.NewServeMux()
 	get(mux, "/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
@@ -42,17 +37,25 @@ func baseMux(checks []Check) *http.ServeMux {
 }
 
 // get registers a GET (and HEAD) route that answers other methods with a JSON 405.
-func get(mux *http.ServeMux, path string, h http.HandlerFunc) {
-	route(mux, "GET", "GET, HEAD", path, h)
-}
+func get(mux *http.ServeMux, path string, h http.HandlerFunc) { methods(mux, path, h, nil) }
 
 // post registers a POST route that answers other methods with a JSON 405.
-func post(mux *http.ServeMux, path string, h http.HandlerFunc) { route(mux, "POST", "POST", path, h) }
+func post(mux *http.ServeMux, path string, h http.HandlerFunc) { methods(mux, path, nil, h) }
 
-func route(mux *http.ServeMux, method, allow, path string, h http.HandlerFunc) {
-	mux.HandleFunc(method+" "+path, h)
+// methods registers GET and/or POST handlers for one path, with one JSON 405
+// for every other method.
+func methods(mux *http.ServeMux, path string, getH, postH http.HandlerFunc) {
+	var allow []string
+	if getH != nil {
+		mux.HandleFunc("GET "+path, getH)
+		allow = append(allow, "GET", "HEAD")
+	}
+	if postH != nil {
+		mux.HandleFunc("POST "+path, postH)
+		allow = append(allow, "POST")
+	}
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Allow", allow)
+		w.Header().Set("Allow", strings.Join(allow, ", "))
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed.")
 	})
 }

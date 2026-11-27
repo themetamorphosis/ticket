@@ -34,6 +34,7 @@ type browser struct {
 	client *http.Client
 	csrf   string
 	key    int
+	origin string // the site browser writes come from; testOrigin if empty
 }
 
 type response struct {
@@ -131,7 +132,11 @@ func (b *browser) startSession() {
 // write sends a protected browser write with the right Origin and CSRF token.
 func (b *browser) write(path string, body any, key string) response {
 	b.t.Helper()
-	h := map[string]string{"Origin": testOrigin, session.CSRFHeader: b.csrf, "Content-Type": "application/json"}
+	origin := b.origin
+	if origin == "" {
+		origin = testOrigin
+	}
+	h := map[string]string{"Origin": origin, session.CSRFHeader: b.csrf, "Content-Type": "application/json"}
 	if key != "" {
 		h["Idempotency-Key"] = key
 	}

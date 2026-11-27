@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"kacheem/backend/internal/audit"
 	"kacheem/backend/internal/cmdutil"
 	"kacheem/backend/internal/config"
 	"kacheem/backend/internal/postgres"
@@ -43,7 +44,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		return err
 	}
 	defer pool.Close()
-	snap, err := publish.Publish(ctx, pool, args[0], cfg.Dir)
+	snap, err := publish.Publish(ctx, pool, audit.Actor{Kind: "system"}, args[0], cfg.Dir)
 	if err != nil {
 		return err
 	}
