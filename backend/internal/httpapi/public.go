@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"kacheem/backend/internal/catalog"
 	"kacheem/backend/internal/dbx"
 	"kacheem/backend/internal/orders"
+	"kacheem/backend/internal/payments"
 	"kacheem/backend/internal/session"
 )
 
@@ -26,6 +28,11 @@ type PublicDeps struct {
 	Origin string
 	Checks []Check
 	Logger *slog.Logger
+	// Payments runs checkout and settlement for the configured gateway.
+	Payments *payments.Service
+	// FakeGatewayPage serves the fake gateway's hosted page in development;
+	// nil with a real provider.
+	FakeGatewayPage http.Handler
 }
 
 // NewPublic returns the handler for the buyer-facing listener. Staff routes
@@ -39,6 +46,11 @@ func NewPublic(d PublicDeps) http.Handler {
 	post(mux, "/api/v1/orders", p.protect(p.createOrder))
 	get(mux, "/api/v1/orders/{ref}", p.getOrder)
 	post(mux, "/api/v1/orders/{ref}/cancel", p.protect(p.cancelOrder))
+	post(mux, "/api/v1/orders/{ref}/checkout", p.protect(p.checkout))
+	get(mux, "/payments/return/{provider}", p.paymentReturn)
+	if d.FakeGatewayPage != nil {
+		mux.Handle("/payments/fake/pay/{ref}", d.FakeGatewayPage)
+	}
 	return withDefaults(d.Sessions.LoadAndSave(mux))
 }
 
@@ -213,12 +225,69 @@ func (p *public) orderError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func (p *public) getOrder(w http.ResponseWriter, r *http.Request) {
-	o, err := orders.Get(r.Context(), p.DB, session.Current(p.Sessions, r).ID, r.PathValue("ref"))
+	ctx := r.Context()
+	o, err := orders.Get(ctx, p.DB, session.Current(p.Sessions, r).ID, r.PathValue("ref"))
 	if err != nil {
 		p.orderError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, orderJSON(o))
+	status, err := payments.LatestStatus(ctx, p.DB, o.ID)
+	if err != nil {
+		p.internal(w, r, err)
+		return
+	}
+	timeline, err := payments.Timeline(ctx, p.DB, o.ID)
+	if err != nil {
+		p.internal(w, r, err)
+		return
+	}
+	body := orderJSON(o)
+	body["payment_provider"] = p.Payments.Gateway.Provider()
+	body["payment_status"] = nil
+	if status != "" {
+		body["payment_status"] = status
+	}
+	entries := make([]map[string]string, len(timeline))
+	for i, e := range timeline {
+		entries[i] = map[string]string{"at": e.At.UTC().Format(time.RFC3339), "kind": e.Kind}
+	}
+	body["timeline"] = entries
+	writeJSON(w, http.StatusOK, body)
+}
+
+func (p *public) checkout(w http.ResponseWriter, r *http.Request) {
+	redirect, err := p.Payments.Checkout(r.Context(), session.Current(p.Sessions, r).ID, r.PathValue("ref"))
+	switch {
+	case errors.Is(err, payments.ErrHoldEnded):
+		writeError(w, http.StatusConflict, "hold_ended", "This order is no longer on hold, or too little time is left to pay.")
+	case errors.Is(err, payments.ErrGatewayUnavailable):
+		p.Logger.Warn("payment start failed", "err", err)
+		writeError(w, http.StatusServiceUnavailable, "payment_unavailable",
+			"Payment is unavailable right now. Your tickets are still held; please try again in a moment.")
+	case err != nil:
+		p.orderError(w, r, err)
+	default:
+		writeJSON(w, http.StatusOK, map[string]string{"redirect_url": redirect})
+	}
+}
+
+// paymentReturn is where the provider sends the buyer back. It settles the
+// payment with the provider and redirects to the order page, which shows the
+// confirmed result. Unknown or unreadable returns go back to the event page.
+func (p *public) paymentReturn(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("provider") != p.Payments.Gateway.Provider() {
+		writeError(w, http.StatusNotFound, "not_found", "No such API route.")
+		return
+	}
+	ref, err := p.Payments.Return(r.Context(), r.URL.Query())
+	if err != nil {
+		p.Logger.Warn("payment return", "err", err, "order_ref", ref)
+	}
+	target := "/"
+	if ref != "" {
+		target = "/order/?ref=" + url.QueryEscape(ref)
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (p *public) cancelOrder(w http.ResponseWriter, r *http.Request) {

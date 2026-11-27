@@ -18,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"kacheem/backend/internal/dbx"
+	"kacheem/backend/internal/payments"
+	"kacheem/backend/internal/payments/fakegw"
 	"kacheem/backend/internal/pgtest"
 	"kacheem/backend/internal/session"
 )
@@ -51,19 +53,37 @@ func (r response) errField(name string) any {
 	return e[name]
 }
 
+// paymentDeps wires the fake gateway; its state lives in pool so faults
+// injected into db only hit the application's own queries.
+func paymentDeps(db dbx.DB, pool *pgxpool.Pool) (*payments.Service, *fakegw.Gateway) {
+	gw := &fakegw.Gateway{DB: pool}
+	return &payments.Service{DB: db, Gateway: gw}, gw
+}
+
 func newServer(t *testing.T, db dbx.DB, pool *pgxpool.Pool) (*httptest.Server, *bytes.Buffer) {
+	t.Helper()
+	srv, logs, _ := newPaymentServer(t, db, pool)
+	return srv, logs
+}
+
+func newPaymentServer(t *testing.T, db dbx.DB, pool *pgxpool.Pool) (*httptest.Server, *bytes.Buffer, *fakegw.Gateway) {
 	t.Helper()
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	svc, gw := paymentDeps(db, pool)
 	h := NewPublic(PublicDeps{
-		DB:       db,
-		Sessions: session.NewBuyer(pool, 0, SessionError(logger)),
-		Origin:   testOrigin,
-		Logger:   logger,
+		DB:              db,
+		Sessions:        session.NewBuyer(pool, 0, SessionError(logger)),
+		Origin:          testOrigin,
+		Logger:          logger,
+		Payments:        svc,
+		FakeGatewayPage: gw,
 	})
 	srv := httptest.NewTLSServer(h)
 	t.Cleanup(srv.Close)
-	return srv, &logs
+	gw.BaseURL = srv.URL
+	svc.ReturnURL = srv.URL + "/payments/return/fake"
+	return srv, &logs, gw
 }
 
 func newBrowser(t *testing.T, srv *httptest.Server) *browser {
@@ -322,8 +342,9 @@ func TestDatabaseFailuresBecomeLoggedInternalErrors(t *testing.T) {
 	for i, req := range requests {
 		pgtest.EachFault(t, pool, func(db dbx.DB) error {
 			var logs bytes.Buffer
+			svc, _ := paymentDeps(db, pool)
 			srv := httptest.NewTLSServer(NewPublic(PublicDeps{DB: db, Sessions: sessions, Origin: testOrigin,
-				Logger: slog.New(slog.NewJSONHandler(&logs, nil))}))
+				Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Payments: svc}))
 			defer srv.Close()
 			b := newBrowser(t, srv)
 			b.startSession()

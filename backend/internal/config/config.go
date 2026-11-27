@@ -22,15 +22,28 @@ type API struct {
 	// PublicOrigin is the exact buyer site origin, e.g. https://tickets.example.org.
 	PublicOrigin    string
 	ShutdownTimeout time.Duration
+	Payment         Payment
+}
+
+// Payment selects and configures the payment gateway. Provider "fake" is the
+// local stand-in for development; "bkash" needs the merchant credentials.
+type Payment struct {
+	Provider       string
+	BkashBaseURL   string
+	BkashUsername  string
+	BkashPassword  string
+	BkashAppKey    string
+	BkashAppSecret string
 }
 
 // DefaultExpiryInterval is how often the worker releases expired holds.
 const DefaultExpiryInterval = 5 * time.Second
 
-// Worker is the configuration of cmd/worker and cmd/migrate.
+// Worker is the configuration of cmd/worker.
 type Worker struct {
 	DatabaseURL    string
 	ExpiryInterval time.Duration
+	Payment        Payment
 }
 
 // Publish is the configuration of cmd/publish.
@@ -49,20 +62,44 @@ func LoadAPI(getenv func(string) string) (API, error) {
 		PublicListen:    required(getenv, "API_PUBLIC_LISTEN", &errs),
 		StaffListen:     required(getenv, "API_STAFF_LISTEN", &errs),
 		PublicOrigin:    required(getenv, "PUBLIC_ORIGIN", &errs),
-		ShutdownTimeout: DefaultShutdownTimeout,
+		ShutdownTimeout: duration(getenv, "SHUTDOWN_TIMEOUT", DefaultShutdownTimeout, &errs),
+		Payment:         loadPayment(getenv, &errs),
 	}
-	cfg.ShutdownTimeout = duration(getenv, "SHUTDOWN_TIMEOUT", DefaultShutdownTimeout, &errs)
 	return cfg, errors.Join(errs...)
 }
 
-// LoadWorker reads the worker and migration configuration.
+// LoadWorker reads the worker configuration.
 func LoadWorker(getenv func(string) string) (Worker, error) {
 	var errs []error
 	cfg := Worker{
 		DatabaseURL:    required(getenv, "DATABASE_URL", &errs),
 		ExpiryInterval: duration(getenv, "EXPIRY_INTERVAL", DefaultExpiryInterval, &errs),
+		Payment:        loadPayment(getenv, &errs),
 	}
 	return cfg, errors.Join(errs...)
+}
+
+// LoadDatabase reads only DATABASE_URL, for cmd/migrate.
+func LoadDatabase(getenv func(string) string) (string, error) {
+	var errs []error
+	url := required(getenv, "DATABASE_URL", &errs)
+	return url, errors.Join(errs...)
+}
+
+func loadPayment(getenv func(string) string, errs *[]error) Payment {
+	p := Payment{Provider: required(getenv, "PAYMENT_PROVIDER", errs)}
+	switch p.Provider {
+	case "", "fake":
+	case "bkash":
+		p.BkashBaseURL = required(getenv, "BKASH_BASE_URL", errs)
+		p.BkashUsername = required(getenv, "BKASH_USERNAME", errs)
+		p.BkashPassword = required(getenv, "BKASH_PASSWORD", errs)
+		p.BkashAppKey = required(getenv, "BKASH_APP_KEY", errs)
+		p.BkashAppSecret = required(getenv, "BKASH_APP_SECRET", errs)
+	default:
+		*errs = append(*errs, fmt.Errorf("PAYMENT_PROVIDER must be fake or bkash, got %q", p.Provider))
+	}
+	return p
 }
 
 // LoadPublish reads the publish job configuration.

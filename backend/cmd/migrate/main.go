@@ -34,11 +34,11 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if len(args) != 1 {
 		return errUsage
 	}
-	cfg, err := config.LoadWorker(getenv)
+	dbURL, err := config.LoadDatabase(getenv)
 	if err != nil {
 		return err
 	}
-	connCfg, err := pgx.ParseConfig(cfg.DatabaseURL)
+	connCfg, err := pgx.ParseConfig(dbURL)
 	if err != nil {
 		return fmt.Errorf("parse database url: %w", err)
 	}

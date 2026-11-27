@@ -1,6 +1,6 @@
 // Command worker runs background jobs under systemd, on hosts separate from
-// buyer traffic. Today it releases expired holds; later milestones add the
-// outbox, fulfillment and reconciliation jobs.
+// buyer traffic: it releases expired holds, reconciles payments the buyer
+// never returned from, and sends refunds. Later milestones add fulfillment.
 package main
 
 import (
@@ -13,13 +13,22 @@ import (
 	"kacheem/backend/internal/cmdutil"
 	"kacheem/backend/internal/config"
 	"kacheem/backend/internal/orders"
+	"kacheem/backend/internal/payments"
+	"kacheem/backend/internal/payments/providers"
 	"kacheem/backend/internal/postgres"
 )
 
 var exit = os.Exit
 
-// expiryBatch bounds how many holds one tick releases.
-const expiryBatch = 500
+const (
+	// expiryBatch bounds how many holds one tick releases.
+	expiryBatch = 500
+	// reconcileIdle is how long an attempt sits unchanged before the worker
+	// asks the provider about it (the buyer may still be on the payment page).
+	reconcileIdle  = 2 * time.Minute
+	reconcileBatch = 100
+	refundBatch    = 50
+)
 
 func main() {
 	exit(cmdutil.Main("worker", func(ctx context.Context) error {
@@ -38,7 +47,8 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		return err
 	}
 	defer pool.Close()
-	logger.Info("worker started", "expiry_interval", cfg.ExpiryInterval.String())
+	pay := &payments.Service{DB: pool, Gateway: providers.New(cfg.Payment, pool, "")}
+	logger.Info("worker started", "expiry_interval", cfg.ExpiryInterval.String(), "payment_provider", pay.Gateway.Provider())
 
 	tick := time.NewTicker(cfg.ExpiryInterval)
 	defer tick.Stop()
@@ -48,16 +58,22 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 			logger.Info("worker stopped")
 			return nil
 		case <-tick.C:
-			n, err := orders.ExpireDue(ctx, pool, expiryBatch)
-			if err != nil && ctx.Err() == nil {
-				// Keep running: the next tick retries, and the alert on the
-				// oldest unreleased hold pages if this persists.
-				logger.Error("release expired holds", "err", err, "released", n)
-				continue
-			}
-			if n > 0 {
-				logger.Info("released expired holds", "count", n)
-			}
+			// Each job keeps running on errors: the next tick retries, and the
+			// alerts on the oldest open hold, payment or refund page if it persists.
+			step(ctx, logger, "released expired holds", func() (int, error) { return orders.ExpireDue(ctx, pool, expiryBatch) })
+			step(ctx, logger, "reconciled payments", func() (int, error) { return pay.Reconcile(ctx, reconcileIdle, reconcileBatch) })
+			step(ctx, logger, "processed refunds", func() (int, error) { return pay.ProcessRefunds(ctx, refundBatch) })
 		}
+	}
+}
+
+func step(ctx context.Context, logger *slog.Logger, msg string, job func() (int, error)) {
+	n, err := job()
+	if err != nil && ctx.Err() == nil {
+		logger.Error(msg+" failed", "err", err, "count", n)
+		return
+	}
+	if n > 0 {
+		logger.Info(msg, "count", n)
 	}
 }
