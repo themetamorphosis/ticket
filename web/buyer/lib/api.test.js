@@ -80,6 +80,15 @@ describe('api', () => {
     expect(err).toMatchObject({ status: 502, code: 'unknown', message: 'Something went wrong. Please try again.' });
   });
 
+  it('shares one session request and does not cache a failure', async () => {
+    fetchMock
+      .mockImplementationOnce(() => reply(503))
+      .mockImplementation(() => reply(200, { csrf_token: 'tok' }));
+    await expect(csrfToken()).rejects.toMatchObject({ status: 503 });
+    expect(await Promise.all([csrfToken(), csrfToken()])).toEqual(['tok', 'tok']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('reports network failures distinctly', async () => {
     fetchMock.mockImplementation(() => Promise.reject(new TypeError('offline')));
     const err = await getAvailability('live').catch((e) => e);

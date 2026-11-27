@@ -156,6 +156,7 @@ describe('OrderView', () => {
   it.each([
     [{ status: 'expired' }, 'This hold has expired'],
     [{ status: 'paid', payment_status: 'succeeded' }, 'Payment received.'],
+    [{ status: 'refunded', payment_status: 'succeeded' }, 'This order was refunded'],
     [{ status: 'held', payment_status: 'review' }, 'Our support team will contact you'],
     [{ status: 'expired', timeline: [{ at, kind: 'refund_requested' }] }, 'will be refunded in full'],
     [

@@ -13,6 +13,8 @@
     "@hugeicons/react": "1.1.10",
     "next": "16.4.6",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "@zxing/browser": "0.2.1",
+    "@zxing/library": "0.23.0"
   }
 }

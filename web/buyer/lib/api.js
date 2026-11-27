@@ -52,10 +52,14 @@ let csrf = null;
 
 // The session endpoint creates the anonymous buyer session and returns the
 // CSRF token bound to it. It is cached for the life of the page.
-export async function csrfToken() {
-  if (!csrf) {
-    csrf = (await request('/api/v1/session')).csrf_token;
-  }
+// Concurrent first writes share one session request; a failure is not cached.
+export function csrfToken() {
+  csrf ??= request('/api/v1/session')
+    .then((res) => res.csrf_token)
+    .catch((err) => {
+      csrf = null;
+      throw err;
+    });
   return csrf;
 }
 

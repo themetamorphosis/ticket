@@ -261,6 +261,7 @@ function Status({ order, onExpire }) {
       </>
     ),
     paid: <>Payment received. Your tickets are on their way.</>,
+    refunded: <>This order was refunded, and its tickets were cancelled.</>,
   }[order.status];
   return (
     <p className="status" role="status">

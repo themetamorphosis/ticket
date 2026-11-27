@@ -2,7 +2,7 @@
 # Only Docker (with Compose) and make are needed on the host.
 
 GO_IMAGE   := golang:1.27.4-bookworm
-NODE_IMAGE := node:22.23.5-bookworm-slim
+NODE_IMAGE := node:24.22.3-bookworm-slim
 NETWORK    := kacheem_default
 UIDGID     := $(shell id -u):$(shell id -g)
 
