@@ -1,0 +1,56 @@
+# Local development and CI only. Staging and production run PostgreSQL and
+# Redis directly on their VPSs (Patroni / Sentinel); see the build plan, section 3.
+name: kacheem
+
+services:
+  db:
+    image: postgres:17.12 # keep in step with the production minor release
+    environment:
+      POSTGRES_DB: tickets
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: dev-only-password # local only, never reused elsewhere
+      TZ: UTC
+      PGTZ: UTC
+    command:
+      - postgres
+      - -c
+      - timezone=UTC
+      - -c
+      - default_transaction_isolation=read committed
+      - -c
+      - lock_timeout=5s
+      - -c
+      - statement_timeout=30s
+      - -c
+      - idle_in_transaction_session_timeout=60s
+    ports:
+      - "127.0.0.1:${DB_HOST_PORT:-5432}:5432" # localhost only; override in .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d tickets"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:8.12.0 # or valkey/valkey; keep in step with production
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --requirepass
+      - dev-only-redis
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379" # localhost only; override in .env
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "dev-only-redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:
