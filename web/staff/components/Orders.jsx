@@ -1,9 +1,33 @@
 'use client';
 
+import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Link from '@mui/material/Link';
+import List from '@mui/material/List';
+import ListItem from '@mui/material/ListItem';
+import ListItemText from '@mui/material/ListItemText';
+import Paper from '@mui/material/Paper';
+import Stack from '@mui/material/Stack';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableContainer from '@mui/material/TableContainer';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import { useCallback, useState } from 'react';
 import { api } from '../lib/api';
 import { money, when } from '../lib/format';
+import { Search as SearchIcon } from './icons';
+import { PageContainer } from './PageContainer';
+import { PageHeader } from './PageHeader';
 import { ReasonAction } from './ReasonAction';
+import { DesktopOnly, MobileOnly, RecordCard } from './RecordList';
+import { EmptyState, LoadingState } from './States';
+import { StatusChip } from './StatusChip';
 import { useLoad } from './useLoad';
 
 export function Orders({ me, initialRef = null }) {
@@ -23,34 +47,84 @@ export function Orders({ me, initialRef = null }) {
   }
 
   return (
-    <>
-      <h1>Orders</h1>
-      <form onSubmit={search} className="row">
-        <label>
-          Reference, email, phone or name
-          <input value={query} onChange={(e) => setQuery(e.target.value)} required />
-        </label>
-        <button type="submit" className="primary">Search</button>
-      </form>
-      {error && <p role="alert">{error}</p>}
-      {results?.length === 0 && <p>No orders found.</p>}
-      {results?.length > 0 && (
-        <table>
-          <thead><tr><th>Order</th><th>Status</th><th>Buyer</th><th>Tickets</th><th>Total</th></tr></thead>
-          <tbody>
-            {results.map((o) => (
-              <tr key={o.public_ref}>
-                <td><button type="button" className="link" onClick={() => setSelected(o.public_ref)}>{o.public_ref}</button></td>
-                <td>{o.status}</td>
-                <td>{o.purchaser_name} · {o.email} · {o.phone}</td>
-                <td>{o.quantity}</td>
-                <td>{money(o.total_minor, o.currency)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+    <PageContainer>
+      <PageHeader title="Orders" subtitle="Find an order, resend tickets, refund or reissue." />
+      <Stack component="form" onSubmit={search} direction={{ xs: 'column', sm: 'row' }} sx={{ gap: 1.5, mb: 3, maxWidth: 640 }}>
+        <TextField
+          label="Reference, email, phone or name"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          required
+          fullWidth
+          size="small"
+        />
+        <Button type="submit" variant="contained" startIcon={<SearchIcon />}>
+          Search
+        </Button>
+      </Stack>
+      {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
+      {results?.length === 0 && <EmptyState title="No orders found." />}
+      {results?.length > 0 && <Results results={results} onOpen={setSelected} />}
       {selected && <OrderDetail key={selected} orderRef={selected} role={me.staff.role} />}
+    </PageContainer>
+  );
+}
+
+function Results({ results, onOpen }) {
+  const open = (o) => (
+    <Link component="button" type="button" onClick={() => onOpen(o.public_ref)} sx={{ fontWeight: 600 }}>
+      {o.public_ref}
+    </Link>
+  );
+  return (
+    <>
+      <DesktopOnly>
+        <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
+          <Table size="small" sx={{ minWidth: 760 }}>
+            <TableHead>
+              <TableRow>
+                <TableCell>Order</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Buyer</TableCell>
+                <TableCell align="right">Tickets</TableCell>
+                <TableCell align="right">Total</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {results.map((o) => (
+                <TableRow key={o.public_ref}>
+                  <TableCell>{open(o)}</TableCell>
+                  <TableCell><StatusChip status={o.status} /></TableCell>
+                  <TableCell>{o.purchaser_name} · {o.email} · {o.phone}</TableCell>
+                  <TableCell align="right">{o.quantity}</TableCell>
+                  <TableCell align="right">{money(o.total_minor, o.currency)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </DesktopOnly>
+      <MobileOnly>
+        {results.map((o) => (
+          <RecordCard
+            key={o.public_ref}
+            title={open(o)}
+            badge={<StatusChip status={o.status} />}
+            fields={[['Buyer', o.purchaser_name], ['Contact', `${o.email} · ${o.phone}`], ['Total', `${money(o.total_minor, o.currency)} · ${o.quantity} tickets`]]}
+          />
+        ))}
+      </MobileOnly>
+    </>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <>
+      <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, mt: 3, mb: 1 }}>
+        {title}
+      </Typography>
+      {children}
     </>
   );
 }
@@ -58,59 +132,98 @@ export function Orders({ me, initialRef = null }) {
 function OrderDetail({ orderRef, role }) {
   const load = useCallback(() => api.order(orderRef), [orderRef]);
   const { data, error, reload } = useLoad(load);
-  if (error) return <p role="alert">{error}</p>;
-  if (!data) return <p aria-busy="true">Loading order…</p>;
+  if (error) return <Alert severity="error" sx={{ mt: 3 }}>{error}</Alert>;
+  if (!data) return <LoadingState label="Loading order…" />;
   const o = data.order;
   const canSupport = role === 'organizer' || role === 'support';
   const canRefund = role === 'organizer' || role === 'finance';
   return (
-    <section aria-labelledby="detail">
-      <h2 id="detail">Order {o.public_ref}</h2>
-      <p>
-        {o.status} · {o.purchaser_name} · {o.email} · {o.phone} · {money(o.total_minor, o.currency)} · {when(o.created_at)}
-      </p>
-      {canSupport && <ReasonAction label="Resend tickets" needsReason={false} action={() => api.resend(o.public_ref)} onDone={reload} />}
-      {canRefund && <ReasonAction label="Refund order" action={(r) => api.refund(o.public_ref, r)} onDone={reload} />}
-      <h3>Tickets</h3>
-      <table>
-        <thead><tr><th>#</th><th>Status</th><th>Entry</th><th></th></tr></thead>
-        <tbody>
-          {data.tickets.map((t) => (
-            <tr key={t.id}>
-              <td>{t.ordinal}{t.credential_version > 1 && ` (reissued ×${t.credential_version - 1})`}</td>
-              <td>{t.status}</td>
-              <td>{t.gate ? `${t.gate}, ${when(t.admitted_at)}` : '—'}</td>
-              <td>
-                {canSupport && t.status === 'valid' && (
-                  <>
-                    <ReasonAction label="Reissue" action={(r) => api.reissue(t.id, r)} onDone={reload} />
-                    <ReasonAction label="Void" action={(r) => api.voidTicket(t.id, r)} onDone={reload} />
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <h3>Payments</h3>
-      <ul>
-        {data.attempts.map((a) => (
-          <li key={a.created_at}>{a.provider} · {a.status} · {money(a.amount_minor)} · {a.provider_trx_id ?? 'no transaction'} · {when(a.created_at)}</li>
-        ))}
-        {data.refunds.map((r) => (
-          <li key={`${r.reason}-${r.status}`}>Refund ({r.reason}) · {r.status} · {money(r.amount_minor)}{r.last_error && ` · ${r.last_error}`}</li>
-        ))}
-      </ul>
-      <h3>Staff actions</h3>
-      {data.history.length === 0 ? (
-        <p>None.</p>
-      ) : (
-        <ul>
-          {data.history.map((h) => (
-            <li key={`${h.at}-${h.action}-${h.object_id}`}>{when(h.at)} · {h.actor} · {h.action}{h.reason && ` · “${h.reason}”`}</li>
-          ))}
-        </ul>
-      )}
-    </section>
+    <Card variant="outlined" component="section" aria-labelledby="detail" sx={{ mt: 3 }}>
+      <CardContent>
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+          <Typography id="detail" variant="h6" component="h2">
+            Order {o.public_ref}
+          </Typography>
+          <StatusChip status={o.status} />
+        </Stack>
+        <Typography color="text.secondary" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>
+          {o.purchaser_name} · {o.email} · {o.phone} · {money(o.total_minor, o.currency)} · {when(o.created_at)}
+        </Typography>
+        <Stack direction="row" sx={{ gap: 1.5, flexWrap: 'wrap', mt: 2 }}>
+          {canSupport && <ReasonAction label="Resend tickets" needsReason={false} action={() => api.resend(o.public_ref)} onDone={reload} />}
+          {canRefund && <ReasonAction label="Refund order" destructive action={(r) => api.refund(o.public_ref, r)} onDone={reload} />}
+        </Stack>
+
+        <Section title="Tickets">
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small" sx={{ minWidth: 520 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>#</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Entry</TableCell>
+                  <TableCell aria-label="Actions" />
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {data.tickets.map((t) => (
+                  <TableRow key={t.id}>
+                    <TableCell>{t.ordinal}{t.credential_version > 1 && ` (reissued ×${t.credential_version - 1})`}</TableCell>
+                    <TableCell><StatusChip status={t.status} /></TableCell>
+                    <TableCell>{t.gate ? `${t.gate}, ${when(t.admitted_at)}` : '—'}</TableCell>
+                    <TableCell>
+                      {canSupport && t.status === 'valid' && (
+                        <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap' }}>
+                          <ReasonAction label="Reissue" action={(r) => api.reissue(t.id, r)} onDone={reload} />
+                          <ReasonAction label="Void" destructive action={(r) => api.voidTicket(t.id, r)} onDone={reload} />
+                        </Stack>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Section>
+
+        <Section title="Payments">
+          <List dense disablePadding>
+            {data.attempts.map((a) => (
+              <ListItem key={a.created_at} disableGutters>
+                <ListItemText
+                  primary={`${a.provider} · ${a.status} · ${money(a.amount_minor)}`}
+                  secondary={`${a.provider_trx_id ?? 'no transaction'} · ${when(a.created_at)}`}
+                />
+              </ListItem>
+            ))}
+            {data.refunds.map((r) => (
+              <ListItem key={`${r.reason}-${r.status}`} disableGutters>
+                <ListItemText
+                  primary={`Refund (${r.reason}) · ${r.status} · ${money(r.amount_minor)}`}
+                  secondary={r.last_error}
+                />
+              </ListItem>
+            ))}
+          </List>
+        </Section>
+
+        <Section title="Staff actions">
+          {data.history.length === 0 ? (
+            <Typography color="text.secondary">None.</Typography>
+          ) : (
+            <List dense disablePadding>
+              {data.history.map((h) => (
+                <ListItem key={`${h.at}-${h.action}-${h.object_id}`} disableGutters>
+                  <ListItemText
+                    primary={`${h.actor} · ${h.action}${h.reason && ` · “${h.reason}”`}`}
+                    secondary={when(h.at)}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </Section>
+      </CardContent>
+    </Card>
   );
 }

@@ -1,9 +1,14 @@
 'use client';
 
+import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
+import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import Link from 'next/link';
 import { useState, useSyncExternalStore } from 'react';
 import { api, resetSessionCache } from '../lib/api';
-import { creationOptions, credentialJSON } from '../lib/webauthn';
+import { AuthCard } from './SignIn';
 
 // The token is read once from the URL fragment and removed from the address
 // bar; later reads return the same value. The server render has no token.
@@ -18,7 +23,7 @@ function takeToken() {
 
 const noSubscription = () => () => {};
 
-/** Accept an invitation: choose a password and register a security key. */
+/** Accept an invitation: choose a password. */
 export function InviteAccept({ getToken = takeToken }) {
   const token = useSyncExternalStore(noSubscription, getToken, () => null);
   const [password, setPassword] = useState('');
@@ -36,60 +41,60 @@ export function InviteAccept({ getToken = takeToken }) {
     setBusy(true);
     setError(null);
     try {
-      const { options } = await api.inviteBegin(token, password);
-      const cred = await navigator.credentials.create(creationOptions(options));
-      await api.inviteFinish(credentialJSON(cred));
+      await api.acceptInvite(token, password);
       resetSessionCache();
       setDone(true);
     } catch (err) {
-      setError(err.name === 'NotAllowedError' ? 'The security key registration was cancelled or timed out.' : err.message);
+      setError(err.message);
       setBusy(false);
     }
   }
 
-  if (token === null) {
-    return (
-      <main className="page narrow" aria-busy="true">
-        <h1>Accept invitation</h1>
-      </main>
-    );
-  }
+  if (token === null) return <AuthCard title="Accept invitation" busy />;
   if (!token) {
     return (
-      <main className="page narrow">
-        <h1>Accept invitation</h1>
-        <p role="alert">Open the full invitation link you were given.</p>
-      </main>
+      <AuthCard title="Accept invitation">
+        <Alert severity="error">Open the full invitation link you were given.</Alert>
+      </AuthCard>
     );
   }
   if (done) {
     return (
-      <main className="page narrow">
-        <h1>You are set up</h1>
-        <p>
-          Your security key is registered. <Link href="/">Continue to the staff site</Link>
-        </p>
-      </main>
+      <AuthCard title="You are set up">
+        <Typography sx={{ mb: 2 }}>Your password is set.</Typography>
+        <Button component={Link} href="/" variant="contained">
+          Continue to the staff site
+        </Button>
+      </AuthCard>
     );
   }
   return (
-    <main className="page narrow">
-      <h1>Accept invitation</h1>
-      <p>Choose a password of at least 12 characters, then register your security key or passkey on this device.</p>
-      <form onSubmit={submit} className="stack">
-        <label>
-          New password
-          <input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        </label>
-        <label>
-          Repeat password
-          <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
-        </label>
-        {error && <p role="alert">{error}</p>}
-        <button type="submit" className="primary" disabled={busy}>
-          {busy ? 'Waiting for your security key…' : 'Register security key'}
-        </button>
-      </form>
-    </main>
+    <AuthCard title="Accept invitation">
+      <Typography color="text.secondary" sx={{ mb: 2 }}>
+        Choose a password of at least 12 characters.
+      </Typography>
+      <Stack component="form" onSubmit={submit} spacing={2}>
+        <TextField
+          label="New password"
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+        <TextField
+          label="Repeat password"
+          type="password"
+          autoComplete="new-password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          required
+        />
+        {error && <Alert severity="error">{error}</Alert>}
+        <Button type="submit" variant="contained" size="large" disabled={busy}>
+          {busy ? 'Saving…' : 'Set password'}
+        </Button>
+      </Stack>
+    </AuthCard>
   );
 }

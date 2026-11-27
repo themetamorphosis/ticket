@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
+import { render } from '../test/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Camera } from './Camera';
 

@@ -21,10 +21,8 @@ describe('staff api', () => {
   it('maps every call to its path and method', async () => {
     const calls = [
       [api.me(), 'GET', '/api/v1/staff/me'],
-      [api.loginBegin('a@b.c', 'pw'), 'POST', '/api/v1/staff/login/begin', '{"email":"a@b.c","password":"pw"}'],
-      [api.loginFinish('{"raw":1}'), 'POST', '/api/v1/staff/login/finish', '{"raw":1}'],
-      [api.inviteBegin('t', 'pw'), 'POST', '/api/v1/staff/invite/begin', '{"token":"t","password":"pw"}'],
-      [api.inviteFinish('{"raw":2}'), 'POST', '/api/v1/staff/invite/finish', '{"raw":2}'],
+      [api.login('a@b.c', 'pw'), 'POST', '/api/v1/staff/login', '{"email":"a@b.c","password":"pw"}'],
+      [api.acceptInvite('t', 'pw'), 'POST', '/api/v1/staff/invite/accept', '{"token":"t","password":"pw"}'],
       [api.logout(), 'POST', '/api/v1/staff/logout'],
       [api.myGates('live show'), 'GET', '/api/v1/ops/events/live%20show/my-gates'],
       [api.admit({ code: 'X' }), 'POST', '/api/v1/admissions', '{"code":"X"}'],

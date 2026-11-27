@@ -1,8 +1,19 @@
 'use client';
 
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import { useCallback, useState } from 'react';
 import { api } from '../lib/api';
 import { when } from '../lib/format';
+import { PageContainer } from './PageContainer';
+import { PageHeader } from './PageHeader';
+import { EmptyState, LoadingState } from './States';
 import { useLoad } from './useLoad';
 
 const FIELDS = [
@@ -36,10 +47,16 @@ export function EventEditor({ me }) {
   const slug = me.events[0]?.slug;
   const load = useCallback(() => (slug ? api.event(slug) : Promise.resolve(null)), [slug]);
   const { data, error, reload } = useLoad(load);
-  if (!slug) return <p>There is no event yet.</p>;
-  if (error) return <p role="alert">{error}</p>;
-  if (!data) return <p aria-busy="true">Loading…</p>;
-  return <Editor key={data.event.published_revision} slug={slug} data={data} reload={reload} />;
+  if (data) return <Editor key={data.event.published_revision} slug={slug} data={data} reload={reload} />;
+  let body = <LoadingState />;
+  if (!slug) body = <EmptyState title="There is no event yet." />;
+  else if (error) body = <Alert severity="error">{error}</Alert>;
+  return (
+    <PageContainer>
+      <PageHeader title="Event" />
+      {body}
+    </PageContainer>
+  );
 }
 
 function Editor({ slug, data, reload }) {
@@ -63,37 +80,56 @@ function Editor({ slug, data, reload }) {
   }, 'Saved. Publish to show the changes to buyers.');
   const resize = run(() => api.setCapacity(slug, Number(capacity)), 'Capacity updated.');
   const publish = run(() => api.publish(slug), 'Published.');
+  const e = data.event;
 
   return (
-    <>
-      <h1>Event</h1>
-      <p className="hint">
-        {data.event.status === 'published' ? `Published revision ${data.event.published_revision}, ${when(data.event.published_at)}` : 'Not published'}
-      </p>
-      {message && <p role="status">{message}</p>}
-      <form onSubmit={save} className="stack">
-        {FIELDS.map(([key, label, type]) => (
-          <label key={key}>
-            {label}
-            <input type={type} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
-          </label>
-        ))}
-        <label>
-          Lineup (comma separated)
-          <input value={form.lineup} onChange={(e) => setForm({ ...form, lineup: e.target.value })} />
-        </label>
-        <button type="submit" className="primary">Save details</button>
-      </form>
-      <form onSubmit={resize} className="row">
-        <label>
-          Capacity
-          <input type="number" min="0" value={capacity} onChange={(e) => setCapacity(e.target.value)} />
-        </label>
-        <button type="submit" className="secondary">Change capacity</button>
-      </form>
-      <form onSubmit={publish}>
-        <button type="submit" className="primary">Publish to the buyer site</button>
-      </form>
-    </>
+    <PageContainer>
+      <PageHeader
+        title="Event"
+        subtitle={e.status === 'published' ? `Published revision ${e.published_revision}, ${when(e.published_at)}` : 'Not published'}
+        actions={<Button variant="contained" onClick={publish}>Publish to the buyer site</Button>}
+      />
+      {message && <Alert severity="info" role="status" sx={{ mb: 3 }}>{message}</Alert>}
+      <Stack direction={{ xs: 'column', lg: 'row' }} sx={{ gap: 3, alignItems: 'flex-start' }}>
+        <Card variant="outlined" sx={{ flex: 1, width: '100%' }}>
+          <CardContent>
+            <Typography variant="h6" component="h2" sx={{ mb: 2 }}>Details</Typography>
+            <Box
+              component="form"
+              onSubmit={save}
+              sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}
+            >
+              {FIELDS.map(([key, label, type]) => (
+                <TextField key={key} label={label} type={type} value={form[key]} onChange={(ev) => setForm({ ...form, [key]: ev.target.value })} />
+              ))}
+              <TextField
+                label="Lineup (comma separated)"
+                value={form.lineup}
+                onChange={(ev) => setForm({ ...form, lineup: ev.target.value })}
+                sx={{ gridColumn: '1 / -1' }}
+              />
+              <Box sx={{ gridColumn: '1 / -1' }}>
+                <Button type="submit" variant="contained">Save details</Button>
+              </Box>
+            </Box>
+          </CardContent>
+        </Card>
+        <Card variant="outlined" sx={{ width: { xs: '100%', lg: 320 } }}>
+          <CardContent>
+            <Typography variant="h6" component="h2" sx={{ mb: 2 }}>Capacity</Typography>
+            <Stack component="form" onSubmit={resize} spacing={2}>
+              <TextField
+                label="Capacity"
+                type="number"
+                value={capacity}
+                onChange={(ev) => setCapacity(ev.target.value)}
+                slotProps={{ htmlInput: { min: 0 } }}
+              />
+              <Button type="submit" variant="outlined">Change capacity</Button>
+            </Stack>
+          </CardContent>
+        </Card>
+      </Stack>
+    </PageContainer>
   );
 }

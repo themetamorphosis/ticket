@@ -1,5 +1,7 @@
 'use client';
 
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
 import { useEffect, useRef, useState } from 'react';
 
 /**
@@ -49,9 +51,17 @@ export function Camera({ active, onCode, loadZXing = () => import('@zxing/browse
   }, [active, onCode, loadZXing, interval]);
 
   return (
-    <div className="camera">
-      <video ref={video} muted playsInline aria-label="Camera view" />
-      {error && <p role="alert">{error}</p>}
-    </div>
+    <Box sx={{ my: 2 }}>
+      {/* Hidden, not unmounted, while idle: the effect needs the element. */}
+      <Box
+        component="video"
+        ref={video}
+        muted
+        playsInline
+        aria-label="Camera view"
+        sx={{ display: active ? 'block' : 'none', width: '100%', maxHeight: '50vh', bgcolor: 'common.black', borderRadius: 2 }}
+      />
+      {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
+    </Box>
   );
 }

@@ -1,10 +1,39 @@
 'use client';
 
+import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import { useState } from 'react';
 import { api, resetSessionCache } from '../lib/api';
-import { credentialJSON, requestOptions } from '../lib/webauthn';
+import { PageContainer } from './PageContainer';
 
-/** Password, then the security key (WebAuthn). */
+/**
+ * The narrow, chrome-free card used by sign-in and invitation pages. These
+ * have no app bar to carry a PageHeader, so they title themselves.
+ */
+export function AuthCard({ title, busy, children }) {
+  return (
+    <PageContainer maxWidth={480}>
+      <Card variant="outlined" aria-busy={busy || undefined} sx={{ mt: { xs: 4, sm: 10 } }}>
+        <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+          <Typography variant="overline" color="text.secondary">
+            Kacheem Staff
+          </Typography>
+          <Typography component="h1" variant="h5" sx={{ fontWeight: 600, mb: 2 }}>
+            {title}
+          </Typography>
+          {children}
+        </CardContent>
+      </Card>
+    </PageContainer>
+  );
+}
+
+/** Email and password. */
 export function SignIn({ onSignedIn }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -16,40 +45,32 @@ export function SignIn({ onSignedIn }) {
     setBusy(true);
     setError(null);
     try {
-      const { options } = await api.loginBegin(email, password);
-      const cred = await navigator.credentials.get(requestOptions(options));
-      await api.loginFinish(credentialJSON(cred));
+      await api.login(email, password);
       resetSessionCache();
       onSignedIn();
     } catch (err) {
-      setError(err.name === 'NotAllowedError' ? 'The security key check was cancelled or timed out.' : err.message);
+      setError(err.message);
       setBusy(false);
     }
   }
 
   return (
-    <main className="page narrow">
-      <h1>Staff sign-in</h1>
-      <form onSubmit={submit} className="stack">
-        <label>
-          Email
-          <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </label>
-        {error && <p role="alert">{error}</p>}
-        <button type="submit" className="primary" disabled={busy}>
-          {busy ? 'Waiting for your security key…' : 'Sign in'}
-        </button>
-      </form>
-    </main>
+    <AuthCard title="Staff sign-in">
+      <Stack component="form" onSubmit={submit} spacing={2}>
+        <TextField label="Email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <TextField
+          label="Password"
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+        {error && <Alert severity="error">{error}</Alert>}
+        <Button type="submit" variant="contained" size="large" disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </Button>
+      </Stack>
+    </AuthCard>
   );
 }

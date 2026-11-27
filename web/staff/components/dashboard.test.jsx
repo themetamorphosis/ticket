@@ -1,4 +1,5 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
+import { render } from '../test/render';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, api } from '../lib/api';
@@ -56,10 +57,10 @@ describe('ReasonAction', () => {
     render(<ReasonAction label="Void" action={action} onDone={onDone} />);
     await user.click(screen.getByRole('button', { name: 'Void' }));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    await user.click(screen.getByRole('button', { name: 'Void' }));
+    await user.click(await screen.findByRole('button', { name: 'Void' }));
     await user.type(screen.getByLabelText(/Reason for/), 'lost phone');
     await user.click(screen.getByRole('button', { name: 'Confirm' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('Already admitted.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Already admitted.');
     await user.click(screen.getByRole('button', { name: 'Confirm' }));
     expect(await screen.findByRole('status')).toHaveTextContent('Void: done.');
     expect(action).toHaveBeenLastCalledWith('lost phone');
@@ -235,12 +236,12 @@ describe('People', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('No such gate.');
     await user.click(within(south).getByRole('button', { name: 'Assign' }));
     await waitFor(() => expect(api.assign).toHaveBeenLastCalledWith('g2', 's2'));
-    await user.type(screen.getByLabelText('New gate'), 'East');
+    await user.type(screen.getByLabelText(/^New gate/), 'East');
     await user.click(screen.getByRole('button', { name: 'Add gate' }));
     await waitFor(() => expect(api.addGate).toHaveBeenCalledWith('live', 'East'));
     expect(screen.getAllByRole('button', { name: 'Revoke access' })).toHaveLength(1);
-    await user.type(screen.getByLabelText('Name'), 'New Person');
-    await user.type(screen.getByLabelText('Email'), 'new@example.org');
+    await user.type(screen.getByLabelText(/^Name/), 'New Person');
+    await user.type(screen.getByLabelText(/^Email/), 'new@example.org');
     await user.selectOptions(screen.getByLabelText('Role'), 'support');
     await user.click(screen.getByRole('button', { name: 'Create invitation' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Already has an account.');
@@ -264,6 +265,15 @@ describe('People', () => {
     api.staff.mockRejectedValueOnce(new ApiError(500, 'internal', 'Staff down.'));
     render(<People me={me('organizer')} />);
     expect(await screen.findByText('Staff down.')).toBeInTheDocument();
+  });
+});
+
+describe('People without gates', () => {
+  it('says there are no gates yet', async () => {
+    api.gates.mockResolvedValue({ gates: [] });
+    api.staff.mockResolvedValue(staffList);
+    render(<People me={me('organizer')} />);
+    expect(await screen.findByText('No gates yet.')).toBeInTheDocument();
   });
 });
 

@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
+import { render } from '../test/render';
 import userEvent from '@testing-library/user-event';
 import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,18 +10,11 @@ import { SignIn } from './SignIn';
 import { StaffShell } from './StaffShell';
 
 vi.mock('../lib/api', async (importOriginal) => (await import('../test/apiMock')).apiMock(await importOriginal()));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
-
-const cred = { id: 'c', rawId: new Uint8Array([1]).buffer, type: 'public-key',
-  response: { clientDataJSON: new Uint8Array([2]).buffer, authenticatorData: new Uint8Array([3]).buffer, signature: new Uint8Array([4]).buffer, userHandle: null } };
-const attestation = { id: 'c', rawId: new Uint8Array([1]).buffer, type: 'public-key',
-  response: { clientDataJSON: new Uint8Array([2]).buffer, attestationObject: new Uint8Array([3]).buffer } };
-const options = { publicKey: { challenge: 'AQI', user: { id: 'dXNlcg', name: 'a' }, allowCredentials: [] } };
+vi.mock('next/navigation', async (importOriginal) => ({ ...(await importOriginal()), useRouter: () => ({ push: vi.fn() }), usePathname: () => '/orders' }));
 
 beforeEach(() => {
   Object.values(api).forEach((f) => f.mockReset());
   resetSessionCache.mockReset();
-  Object.defineProperty(navigator, 'credentials', { configurable: true, value: { get: vi.fn(), create: vi.fn() } });
 });
 
 describe('StaffShell', () => {
@@ -63,55 +57,47 @@ describe('StaffShell', () => {
 
 describe('SignIn', () => {
   async function fill(user) {
-    await user.type(screen.getByLabelText('Email'), 'org@example.org');
-    await user.type(screen.getByLabelText('Password'), 'correct horse');
+    await user.type(screen.getByLabelText(/^Email/), 'org@example.org');
+    await user.type(screen.getByLabelText(/^Password/), 'correct horse');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
   }
 
-  it('checks the password, then the security key', async () => {
+  it('signs in with email and password', async () => {
     const user = userEvent.setup();
     const onSignedIn = vi.fn();
-    api.loginBegin.mockResolvedValue({ options });
-    navigator.credentials.get.mockResolvedValue(cred);
-    api.loginFinish.mockResolvedValue({ staff: {} });
+    api.login.mockResolvedValue({ staff: {} });
     render(<SignIn onSignedIn={onSignedIn} />);
     await fill(user);
     expect(onSignedIn).toHaveBeenCalled();
-    expect(api.loginBegin).toHaveBeenCalledWith('org@example.org', 'correct horse');
-    expect(JSON.parse(api.loginFinish.mock.calls[0][0]).rawId).toBe('AQ');
+    expect(api.login).toHaveBeenCalledWith('org@example.org', 'correct horse');
     expect(resetSessionCache).toHaveBeenCalled();
   });
 
-  it.each([
-    [Object.assign(new Error('x'), { name: 'NotAllowedError' }), 'cancelled or timed out'],
-    [new ApiError(401, 'sign_in_failed', 'Those details did not match.'), 'Those details did not match.'],
-  ])('explains a failure (%#)', async (err, text) => {
+  it('explains a failure', async () => {
     const user = userEvent.setup();
-    api.loginBegin.mockResolvedValue({ options });
-    navigator.credentials.get.mockRejectedValue(err);
+    api.login.mockRejectedValue(new ApiError(401, 'sign_in_failed', 'Those details did not match.'));
     render(<SignIn onSignedIn={vi.fn()} />);
     await fill(user);
-    expect(await screen.findByRole('alert')).toHaveTextContent(text);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Those details did not match.');
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
   });
 });
 
 describe('InviteAccept', () => {
   async function fill(user, a = 'a long password', b = a) {
-    await user.type(screen.getByLabelText('New password'), a);
-    await user.type(screen.getByLabelText('Repeat password'), b);
-    await user.click(screen.getByRole('button', { name: 'Register security key' }));
+    await user.type(screen.getByLabelText(/^New password/), a);
+    await user.type(screen.getByLabelText(/^Repeat password/), b);
+    await user.click(screen.getByRole('button', { name: 'Set password' }));
   }
 
-  it('sets the password and registers a key', async () => {
+  it('sets the password', async () => {
     const user = userEvent.setup();
-    api.inviteBegin.mockResolvedValue({ options: { publicKey: { challenge: 'AQI', user: { id: 'AA' } } } });
-    navigator.credentials.create.mockResolvedValue(attestation);
-    api.inviteFinish.mockResolvedValue({ staff: {} });
+    api.acceptInvite.mockResolvedValue({ staff: {} });
     render(<InviteAccept getToken={() => 'tok'} />);
     await fill(user);
     expect(await screen.findByRole('heading', { name: 'You are set up' })).toBeInTheDocument();
-    expect(api.inviteBegin).toHaveBeenCalledWith('tok', 'a long password');
+    expect(api.acceptInvite).toHaveBeenCalledWith('tok', 'a long password');
+    expect(resetSessionCache).toHaveBeenCalled();
   });
 
   it('checks the passwords match', async () => {
@@ -119,26 +105,23 @@ describe('InviteAccept', () => {
     render(<InviteAccept getToken={() => 'tok'} />);
     await fill(user, 'a long password', 'another one!!');
     expect(screen.getByRole('alert')).toHaveTextContent('do not match');
-    expect(api.inviteBegin).not.toHaveBeenCalled();
+    expect(api.acceptInvite).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [Object.assign(new Error('x'), { name: 'NotAllowedError' }), 'cancelled or timed out'],
-    [new ApiError(404, 'invite_invalid', 'This invitation is not valid.'), 'This invitation is not valid.'],
-  ])('explains a failure (%#)', async (err, text) => {
+  it('explains a failure', async () => {
     const user = userEvent.setup();
-    api.inviteBegin.mockResolvedValue({ options: { publicKey: { challenge: 'AQI', user: { id: 'AA' } } } });
-    navigator.credentials.create.mockRejectedValue(err);
+    api.acceptInvite.mockRejectedValue(new ApiError(404, 'invite_invalid', 'This invitation is not valid.'));
     render(<InviteAccept getToken={() => 'tok'} />);
     await fill(user);
-    expect(await screen.findByRole('alert')).toHaveTextContent(text);
+    expect(await screen.findByRole('alert')).toHaveTextContent('This invitation is not valid.');
+    expect(screen.getByRole('button', { name: 'Set password' })).toBeEnabled();
   });
 
   it('reads the token from the link once and strips it', () => {
     window.history.pushState({}, '', '/invite/#secret-token');
     render(<InviteAccept />);
     expect(window.location.hash).toBe('');
-    expect(screen.getByRole('button', { name: 'Register security key' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Set password' })).toBeInTheDocument();
   });
 
   it('needs the full link, and renders empty on the server', () => {

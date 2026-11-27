@@ -1,12 +1,20 @@
 'use client';
 
-import { Alert02Icon, CancelCircleIcon, CheckmarkCircle02Icon, WifiDisconnected01Icon } from '@hugeicons/core-free-icons';
+import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
+import Paper from '@mui/material/Paper';
+import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { deviceId } from '../lib/device';
 import { beep } from '../lib/sound';
 import { Camera } from './Camera';
-import { Icon } from './Icon';
+import { Cancel as CancelIcon, CheckCircle as CheckCircleIcon, Warning as WarningIcon, WifiOff as WifiOffIcon } from './icons';
+import { PageContainer } from './PageContainer';
+import { PageHeader } from './PageHeader';
+import { EmptyState, LoadingState } from './States';
 
 // A ticket QR opened directly (the phone camera opens /scan#<credential>).
 // It is only offered for confirmation: opening a link never admits anyone.
@@ -17,28 +25,45 @@ function takeHashScan() {
   return `${window.location.origin}/scan#${hash}`;
 }
 
+// The verdict is carried by colour, icon, words and sound together.
 const LOOK = {
-  admitted: { tone: 'ok', icon: CheckmarkCircle02Icon },
-  already_used: { tone: 'warn', icon: Alert02Icon },
+  admitted: { tone: 'success', icon: CheckCircleIcon },
+  already_used: { tone: 'warning', icon: WarningIcon },
 };
 
-function Result({ result }) {
-  const look = LOOK[result.outcome] ?? { tone: 'stop', icon: CancelCircleIcon };
-  const time = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+/** A full-width verdict panel in a semantic colour. */
+function Verdict({ bgcolor, color, icon: VerdictIcon, title, children }) {
   return (
-    <div className={`result ${look.tone}`} role="status">
-      <Icon icon={look.icon} size={64} />
-      <p className="verdict">{result.replay ? 'Previous scan confirmed' : result.message}</p>
-      {result.ticket && <p>{result.ticket}</p>}
-      {result.first_gate && (
-        <p>
-          First admitted at {result.first_gate}, {time(result.first_at)}. Send the holder to the supervisor.
-        </p>
-      )}
-      {result.replay && <p>{result.message} at {time(result.decided_at)}</p>}
-    </div>
+    <Paper role="status" elevation={0} sx={{ bgcolor, color, p: 3, borderRadius: 4, textAlign: 'center', display: 'grid', justifyItems: 'center', gap: 0.5 }}>
+      <VerdictIcon size={64} />
+      <Typography component="p" variant="h4" sx={{ fontWeight: 800 }}>{title}</Typography>
+      {children}
+    </Paper>
   );
 }
+
+function Result({ result }) {
+  const look = LOOK[result.outcome] ?? { tone: 'error', icon: CancelIcon };
+  const time = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return (
+    <Verdict
+      bgcolor={`${look.tone}.main`}
+      color={`${look.tone}.contrastText`}
+      icon={look.icon}
+      title={result.replay ? 'Previous scan confirmed' : result.message}
+    >
+      {result.ticket && <Typography>{result.ticket}</Typography>}
+      {result.first_gate && (
+        <Typography>
+          First admitted at {result.first_gate}, {time(result.first_at)}. Send the holder to the supervisor.
+        </Typography>
+      )}
+      {result.replay && <Typography>{result.message} at {time(result.decided_at)}</Typography>}
+    </Verdict>
+  );
+}
+
+const big = { width: '100%', minHeight: 64, fontSize: '1.25rem' };
 
 /**
  * The gate scanner. The operator arms one scan with "Admit next"; the first
@@ -102,88 +127,106 @@ export function Scanner({ me, makeRequestId = () => crypto.randomUUID(), readHas
     [phase, submit],
   );
 
-  if (!slug) return <p>There is no event to scan for.</p>;
-  if (gates === null) return <p aria-busy="true">Loading your gates…</p>;
-  if (gates.length === 0) return <p role="alert">You are not assigned to a gate. Ask the organizer.</p>;
+  let body;
+  if (!slug) body = <EmptyState title="There is no event to scan for." />;
+  else if (gates === null) body = <LoadingState label="Loading your gates…" />;
+  else if (gates.length === 0) body = <Alert severity="warning">You are not assigned to a gate. Ask the organizer.</Alert>;
+  else {
+    body = (
+      <Stack spacing={2} sx={{ maxWidth: 560 }}>
+        <TextField
+          select
+          label="Gate"
+          value={gate}
+          onChange={(e) => setGate(e.target.value)}
+          disabled={phase !== 'idle'}
+          slotProps={{ select: { native: true } }}
+        >
+          {gates.map((g) => (
+            <option key={g.id} value={g.id}>{g.name}</option>
+          ))}
+        </TextField>
+
+        {linked && phase === 'idle' && (
+          <Paper variant="outlined" sx={{ p: 2, borderStyle: 'dashed', borderColor: 'primary.main' }}>
+            <Typography sx={{ mb: 1.5 }}>A ticket link was opened on this device.</Typography>
+            <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap' }}>
+              <Button variant="contained" onClick={() => { setLinked(null); submit({ qr: linked }); }}>
+                Admit this ticket
+              </Button>
+              <Button onClick={() => setLinked(null)}>Dismiss</Button>
+            </Stack>
+          </Paper>
+        )}
+
+        {phase === 'idle' && (
+          <Button variant="contained" size="large" sx={big} onClick={() => setPhase('armed')}>
+            Admit next
+          </Button>
+        )}
+        <CameraView active={phase === 'armed'} onCode={onCode} />
+        {phase === 'armed' && (
+          <Button variant="outlined" onClick={() => setPhase('idle')}>
+            Cancel scan
+          </Button>
+        )}
+        {phase === 'deciding' && <LoadingState label="Checking…" />}
+        {phase === 'unconfirmed' && (
+          <Verdict bgcolor="grey.800" color="common.white" icon={WifiOffIcon} title="Unconfirmed">
+            <Typography>
+              No answer from the server. Do not admit yet. Retry, move to the backup network, or send the holder to the supervisor desk.
+            </Typography>
+            <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap', justifyContent: 'center', mt: 1.5 }}>
+              <Button variant="contained" onClick={() => send(last.current)}>
+                Retry the same scan
+              </Button>
+              <Button color="inherit" onClick={() => setPhase('idle')}>
+                Give up
+              </Button>
+            </Stack>
+          </Verdict>
+        )}
+        {phase === 'result' && (
+          <>
+            <Result result={result} />
+            <Button variant="contained" size="large" sx={big} onClick={() => setPhase('idle')}>
+              Next person
+            </Button>
+          </>
+        )}
+
+        {phase === 'idle' && (
+          <Stack
+            component="form"
+            direction="row"
+            sx={{ gap: 1.5, alignItems: 'center' }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit({ code });
+              setCode('');
+            }}
+          >
+            <TextField
+              label="Or type the code printed on the ticket"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              required
+              fullWidth
+              slotProps={{ htmlInput: { autoCapitalize: 'characters', autoComplete: 'off' } }}
+            />
+            <Button type="submit" variant="outlined" sx={{ flexShrink: 0 }}>
+              Check code
+            </Button>
+          </Stack>
+        )}
+      </Stack>
+    );
+  }
 
   return (
-    <section className="scanner" aria-labelledby="scanner-title">
-      <h1 id="scanner-title">Scanner</h1>
-      <label>
-        Gate
-        <select value={gate} onChange={(e) => setGate(e.target.value)} disabled={phase !== 'idle'}>
-          {gates.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {linked && phase === 'idle' && (
-        <div className="linked">
-          <p>A ticket link was opened on this device.</p>
-          <button type="button" className="primary" onClick={() => { setLinked(null); submit({ qr: linked }); }}>
-            Admit this ticket
-          </button>
-          <button type="button" className="secondary" onClick={() => setLinked(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {phase === 'idle' && (
-        <button type="button" className="primary big" onClick={() => setPhase('armed')}>
-          Admit next
-        </button>
-      )}
-      <CameraView active={phase === 'armed'} onCode={onCode} />
-      {phase === 'armed' && (
-        <button type="button" className="secondary" onClick={() => setPhase('idle')}>
-          Cancel scan
-        </button>
-      )}
-      {phase === 'deciding' && <p aria-live="polite">Checking…</p>}
-      {phase === 'unconfirmed' && (
-        <div className="result unconfirmed" role="status">
-          <Icon icon={WifiDisconnected01Icon} size={64} />
-          <p className="verdict">Unconfirmed</p>
-          <p>No answer from the server. Do not admit yet. Retry, move to the backup network, or send the holder to the supervisor desk.</p>
-          <button type="button" className="primary" onClick={() => send(last.current)}>
-            Retry the same scan
-          </button>
-          <button type="button" className="secondary" onClick={() => setPhase('idle')}>
-            Give up
-          </button>
-        </div>
-      )}
-      {phase === 'result' && (
-        <>
-          <Result result={result} />
-          <button type="button" className="primary big" onClick={() => setPhase('idle')}>
-            Next person
-          </button>
-        </>
-      )}
-
-      {phase === 'idle' && (
-        <form
-          className="stack"
-          onSubmit={(e) => {
-            e.preventDefault();
-            submit({ code });
-            setCode('');
-          }}
-        >
-          <label>
-            Or type the code printed on the ticket
-            <input value={code} onChange={(e) => setCode(e.target.value)} autoCapitalize="characters" autoComplete="off" required />
-          </label>
-          <button type="submit" className="secondary">
-            Check code
-          </button>
-        </form>
-      )}
-    </section>
+    <PageContainer>
+      <PageHeader title="Scanner" />
+      {body}
+    </PageContainer>
   );
 }

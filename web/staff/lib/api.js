@@ -11,14 +11,14 @@ export class ApiError extends Error {
 
 const GENERIC = 'Something went wrong. Please try again.';
 
-export async function request(path, { method = 'GET', body, raw, headers = {} } = {}) {
+export async function request(path, { method = 'GET', body, headers = {} } = {}) {
   let res;
   try {
     res = await fetch(path, {
       method,
       credentials: 'same-origin',
-      headers: body === undefined && raw === undefined ? headers : { 'Content-Type': 'application/json', ...headers },
-      body: raw ?? (body === undefined ? undefined : JSON.stringify(body)),
+      headers: body === undefined ? headers : { 'Content-Type': 'application/json', ...headers },
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
     throw new ApiError(0, 'network', 'No connection to the server.');
@@ -50,19 +50,17 @@ export function resetSessionCache() {
   csrf = null;
 }
 
-export async function write(path, body, raw) {
+export async function write(path, body) {
   const token = await csrfToken();
-  return request(path, { method: 'POST', body, raw, headers: { 'X-CSRF-Token': token } });
+  return request(path, { method: 'POST', body, headers: { 'X-CSRF-Token': token } });
 }
 
 const enc = encodeURIComponent;
 
 export const api = {
   me: () => request('/api/v1/staff/me'),
-  loginBegin: (email, password) => write('/api/v1/staff/login/begin', { email, password }),
-  loginFinish: (credentialJSON) => write('/api/v1/staff/login/finish', undefined, credentialJSON),
-  inviteBegin: (token, password) => write('/api/v1/staff/invite/begin', { token, password }),
-  inviteFinish: (credentialJSON) => write('/api/v1/staff/invite/finish', undefined, credentialJSON),
+  login: (email, password) => write('/api/v1/staff/login', { email, password }),
+  acceptInvite: (token, password) => write('/api/v1/staff/invite/accept', { token, password }),
   logout: () => write('/api/v1/staff/logout'),
   myGates: (slug) => request(`/api/v1/ops/events/${enc(slug)}/my-gates`),
   admit: (scan) => write('/api/v1/admissions', scan),
