@@ -223,3 +223,9 @@ p.summary { display: block; }
 .payment-note { padding: 0.75rem var(--space); border-left: 4px solid var(--color-accent); background: var(--color-surface); }
 .history { padding-left: 1.25rem; color: var(--color-muted); }
 .history time { font-variant-numeric: tabular-nums; color: var(--color-text); }
+
+.tickets, .deliveries { list-style: none; padding: 0; display: grid; gap: 0.5rem; }
+.tickets li { display: flex; justify-content: space-between; align-items: center; gap: var(--space);
+  padding: 0.75rem var(--space); border: 1px solid var(--color-border); border-radius: var(--radius); }
+.tickets a { min-height: 2.75rem; display: inline-flex; align-items: center; font-weight: 600; }
+.deliveries { color: var(--color-muted); font-size: 0.95rem; }

@@ -1,8 +1,8 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, cancelOrder, getOrder, startCheckout } from '../lib/api';
-import { deferred, order } from '../test/fixtures';
+import { ApiError, cancelOrder, getOrder, resendTickets, startCheckout } from '../lib/api';
+import { deferred, order, tickets } from '../test/fixtures';
 import { OrderView } from './OrderView';
 
 vi.mock('../lib/api', async (importOriginal) => ({
@@ -10,6 +10,7 @@ vi.mock('../lib/api', async (importOriginal) => ({
   getOrder: vi.fn(),
   cancelOrder: vi.fn(),
   startCheckout: vi.fn(),
+  resendTickets: vi.fn(),
 }));
 
 const ref = () => 'AB12C-DE34F';
@@ -19,6 +20,7 @@ beforeEach(() => {
   getOrder.mockReset();
   cancelOrder.mockReset();
   startCheckout.mockReset();
+  resendTickets.mockReset();
 });
 afterEach(() => vi.useRealTimers());
 
@@ -176,5 +178,55 @@ describe('OrderView', () => {
     render(<OrderView getRef={getRef} />);
     expect(await screen.findByRole('alert')).toHaveTextContent(text);
     expect(screen.getByRole('link', { name: 'Back to the event' })).toHaveAttribute('href', '/');
+  });
+
+  it('lists the tickets of a paid order with where they were sent', async () => {
+    getOrder.mockResolvedValue(
+      order({ status: 'paid', payment_status: 'succeeded', tickets: tickets(3), deliveries: { email: { status: 'sent' }, sms: { status: 'failed' } } }),
+    );
+    render(<OrderView getRef={ref} />);
+    expect(await screen.findAllByRole('link', { name: 'Download PDF' })).toHaveLength(3);
+    expect(screen.getByText('Emailed to nusrat@example.com.')).toBeInTheDocument();
+    expect(screen.getByText(/could not text \+8801711000000 yet/)).toBeInTheDocument();
+  });
+
+  it('polls until every ticket is ready, showing deliveries in progress', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    getOrder
+      .mockResolvedValueOnce(order({ status: 'paid', payment_status: 'succeeded', tickets: tickets(2, false) }))
+      .mockResolvedValueOnce(
+        order({ status: 'paid', payment_status: 'succeeded', tickets: tickets(2), deliveries: { sms: { status: 'sent' }, email: { status: 'failed' } } }),
+      );
+    render(<OrderView getRef={ref} pollMs={50} />);
+    expect(await screen.findAllByText('Preparing…')).toHaveLength(2);
+    expect(screen.getByText(/Emailing them to nusrat@example.com/)).toBeInTheDocument();
+    expect(screen.getByText(/Texting a download link/)).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTime(120));
+    expect(await screen.findAllByRole('link', { name: 'Download PDF' })).toHaveLength(2);
+    expect(screen.getByText(/A download link was texted/)).toBeInTheDocument();
+    expect(screen.getByText(/could not email/)).toBeInTheDocument();
+  });
+
+  it('sends the tickets again on request', async () => {
+    const user = userEvent.setup();
+    const pending = deferred();
+    resendTickets.mockReturnValue(pending.promise);
+    getOrder.mockResolvedValue(order({ status: 'paid', payment_status: 'succeeded', tickets: tickets(1) }));
+    render(<OrderView getRef={ref} />);
+    await user.click(await screen.findByRole('button', { name: 'Send my tickets again' }));
+    expect(screen.getByRole('button', { name: 'Sending…' })).toBeDisabled();
+    await act(async () => pending.resolve({ status: 'queued' }));
+    expect(screen.getByText('Your tickets are on their way again.')).toBeInTheDocument();
+    expect(resendTickets).toHaveBeenCalledWith('AB12C-DE34F');
+  });
+
+  it('explains a resend that came too soon', async () => {
+    const user = userEvent.setup();
+    resendTickets.mockRejectedValue(new ApiError(429, 'too_soon', 'Your tickets were sent a few minutes ago.'));
+    getOrder.mockResolvedValue(order({ status: 'paid', payment_status: 'succeeded', tickets: tickets(1) }));
+    render(<OrderView getRef={ref} />);
+    await user.click(await screen.findByRole('button', { name: 'Send my tickets again' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('sent a few minutes ago');
+    expect(screen.getByRole('button', { name: 'Send my tickets again' })).toBeEnabled();
   });
 });

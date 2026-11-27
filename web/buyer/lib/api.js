@@ -87,3 +87,19 @@ export async function cancelOrder(ref) {
   const token = await csrfToken();
   return request(`/api/v1/orders/${enc(ref)}/cancel`, { method: 'POST', headers: { 'X-CSRF-Token': token } });
 }
+
+// Trades the secret from an SMS pickup link for access in this browser session.
+export async function exchangePickup(secret) {
+  const token = await csrfToken();
+  return request('/api/v1/pickup/exchange', { method: 'POST', body: { secret }, headers: { 'X-CSRF-Token': token } });
+}
+
+// Lists the orders this browser opened through pickup links.
+export function listPickups() {
+  return request('/api/v1/pickup');
+}
+
+export async function resendTickets(ref) {
+  const token = await csrfToken();
+  return request(`/api/v1/orders/${enc(ref)}/resend`, { method: 'POST', headers: { 'X-CSRF-Token': token } });
+}

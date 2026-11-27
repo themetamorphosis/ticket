@@ -8,6 +8,9 @@ import {
   getOrder,
   getQuote,
   loadEvent,
+  exchangePickup,
+  listPickups,
+  resendTickets,
   resetSessionCache,
   startCheckout,
 } from './api';
@@ -95,5 +98,26 @@ describe('startCheckout', () => {
     expect(await startCheckout('AB12C DE34F')).toBe('https://pay.example/1');
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/AB12C%20DE34F/checkout');
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'POST', headers: { 'X-CSRF-Token': 'tok' } });
+  });
+});
+
+describe('tickets and pickup', () => {
+  it('exchanges a pickup secret, lists pickups and resends', async () => {
+    resetSessionCache();
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => reply(200, { csrf_token: 'tok' }))
+      .mockImplementation(() => reply(200, { orders: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await exchangePickup('s3cret');
+    await listPickups();
+    await resendTickets('AB12C DE34F');
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+      '/api/v1/session',
+      '/api/v1/pickup/exchange',
+      '/api/v1/pickup',
+      '/api/v1/orders/AB12C%20DE34F/resend',
+    ]);
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'POST', body: '{"secret":"s3cret"}', headers: { 'X-CSRF-Token': 'tok' } });
+    expect(fetchMock.mock.calls[3][1]).toMatchObject({ method: 'POST', headers: { 'X-CSRF-Token': 'tok' } });
   });
 });

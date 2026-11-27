@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ApiError, cancelOrder, getOrder, startCheckout } from '../lib/api';
+import { ApiError, cancelOrder, getOrder, resendTickets, startCheckout } from '../lib/api';
 import { formatCountdown, formatDateTime, formatMoney, formatTime } from '../lib/format';
+import { TicketList } from './TicketList';
 
 function refFromLocation() {
   return new URLSearchParams(window.location.search).get('ref');
@@ -50,8 +51,10 @@ export function OrderView({ getRef = refFromLocation, navigate = goTo, pollMs = 
   }, [getRef]);
 
   const checking = order?.status === 'held' && order.payment_status === 'pending';
+  const rendering = order?.status === 'paid' && order.tickets.some((t) => !t.ready);
+  const waiting = checking || rendering;
   useEffect(() => {
-    if (!checking || polls >= maxPolls) return undefined;
+    if (!waiting || polls >= maxPolls) return undefined;
     const id = setTimeout(() => {
       getOrder(order.ref)
         .then(setOrder)
@@ -59,7 +62,7 @@ export function OrderView({ getRef = refFromLocation, navigate = goTo, pollMs = 
         .finally(() => setPolls((n) => n + 1));
     }, pollMs);
     return () => clearTimeout(id);
-  }, [checking, polls, maxPolls, pollMs, order?.ref]);
+  }, [waiting, polls, maxPolls, pollMs, order?.ref]);
 
   async function act(kind, work) {
     setBusy(kind);
@@ -73,6 +76,13 @@ export function OrderView({ getRef = refFromLocation, navigate = goTo, pollMs = 
   }
 
   const pay = () => act('pay', async () => navigate(await startCheckout(order.ref)));
+  const [resent, setResent] = useState(false);
+  const resend = () =>
+    act('resend', async () => {
+      await resendTickets(order.ref);
+      setResent(true);
+      setBusy(null);
+    });
   const cancel = () =>
     act('cancel', async () => {
       setOrder(await cancelOrder(order.ref));
@@ -132,6 +142,20 @@ export function OrderView({ getRef = refFromLocation, navigate = goTo, pollMs = 
           </button>
         </div>
       )}
+      {order.status === 'paid' && (
+        <section aria-labelledby="tickets">
+          <h2 id="tickets">Tickets</h2>
+          <TicketList tickets={order.tickets} />
+          <Deliveries order={order} />
+          {resent ? (
+            <p role="status">Your tickets are on their way again.</p>
+          ) : (
+            <button type="button" className="secondary" onClick={resend} disabled={busy !== null}>
+              {busy === 'resend' ? 'Sending…' : 'Send my tickets again'}
+            </button>
+          )}
+        </section>
+      )}
       <section aria-labelledby="history">
         <h2 id="history">History</h2>
         <ol className="history">
@@ -143,6 +167,35 @@ export function OrderView({ getRef = refFromLocation, navigate = goTo, pollMs = 
         </ol>
       </section>
     </main>
+  );
+}
+
+function Deliveries({ order }) {
+  const line = (channel, sent, failed, pending) => {
+    const status = order.deliveries[channel]?.status;
+    if (status === 'sent') return sent;
+    if (status === 'failed') return failed;
+    return pending;
+  };
+  return (
+    <ul className="deliveries">
+      <li>
+        {line(
+          'email',
+          `Emailed to ${order.purchaser.email}.`,
+          `We could not email ${order.purchaser.email} yet and will keep trying.`,
+          `Emailing them to ${order.purchaser.email}…`,
+        )}
+      </li>
+      <li>
+        {line(
+          'sms',
+          `A download link was texted to ${order.purchaser.phone}.`,
+          `We could not text ${order.purchaser.phone} yet and will keep trying.`,
+          `Texting a download link to ${order.purchaser.phone}…`,
+        )}
+      </li>
+    </ul>
   );
 }
 

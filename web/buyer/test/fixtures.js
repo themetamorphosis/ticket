@@ -50,6 +50,8 @@ export function order(overrides = {}) {
     payment_provider: 'fake',
     payment_status: null,
     timeline: [{ at: new Date(now).toISOString(), kind: 'order_created' }],
+    tickets: [],
+    deliveries: {},
     ...overrides,
   };
 }
@@ -63,4 +65,15 @@ export function deferred() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+export function tickets(n, ready = true) {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `t${i + 1}`,
+    number: i + 1,
+    of: n,
+    status: 'valid',
+    ready,
+    pdf_url: `/api/v1/tickets/t${i + 1}/pdf`,
+  }));
 }
