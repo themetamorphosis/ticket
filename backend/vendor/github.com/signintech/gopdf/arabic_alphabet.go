@@ -27,11 +27,11 @@ const (
 	MARK_NOON_GHUNNA rune = '\u0658' // ٘ (noon ghunna)
 
 	// Shadda + Vowel Ligatures (Arabic Presentation Forms-B)
-	SHADDA_FATHA          rune = '\uFC60' // ﱠ
-	SHADDA_DAMMA          rune = '\uFC61' // ﱡ
-	SHADDA_KASRA          rune = '\uFC62' // ﱢ
-	SHADDA_DAMMATAN       rune = '\uFC5E' // ﱞ (Shadda + Tanween Damm)
-	SHADDA_KASRATAN       rune = '\uFC5F' // ﱟ (Shadda + Tanween Kasr)
+	SHADDA_FATHA            rune = '\uFC60' // ﱠ
+	SHADDA_DAMMA            rune = '\uFC61' // ﱡ
+	SHADDA_KASRA            rune = '\uFC62' // ﱢ
+	SHADDA_DAMMATAN         rune = '\uFC5E' // ﱞ (Shadda + Tanween Damm)
+	SHADDA_KASRATAN         rune = '\uFC5F' // ﱟ (Shadda + Tanween Kasr)
 	SHADDA_SUPERSCRIPT_ALEF rune = '\uFC63' // ﱣ
 )
 

@@ -6,6 +6,7 @@ require (
 	github.com/alexedwards/scs/pgxstore v0.0.0-20261119174900-ed2e92329119
 	github.com/alexedwards/scs/v2 v2.9.0
 	github.com/jackc/pgx/v5 v5.13.0
+	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/pressly/goose/v3 v3.30.2
 	github.com/redis/go-redis/v9 v9.24.0
 	github.com/signintech/gopdf v0.38.6
@@ -29,6 +30,7 @@ require (
 	golang.org/x/text v0.44.0 // indirect
 	golang.org/x/tools v0.53.0 // indirect
 	golang.org/x/vuln v1.10.0 // indirect
+	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 )
 
 tool golang.org/x/vuln/cmd/govulncheck
