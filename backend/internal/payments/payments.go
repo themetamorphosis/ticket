@@ -23,6 +23,8 @@ var (
 	ErrGatewayUnavailable = errors.New("payment provider unavailable")
 	// ErrUnknownPayment means a return redirect names no attempt of ours.
 	ErrUnknownPayment = errors.New("unknown payment")
+	// ErrNotifyUnsupported means the configured provider sends no notifications.
+	ErrNotifyUnsupported = errors.New("payment notifications not supported by this provider")
 )
 
 const (
@@ -140,7 +142,7 @@ func (s *Service) Checkout(ctx context.Context, buyerID, orderRef string) (strin
 
 	started, err := s.Gateway.Start(ctx, StartRequest{
 		MerchantRef: a.MerchantRef, AmountMinor: a.AmountMinor, Currency: a.Currency,
-		ReturnURL: s.ReturnURL, Phone: o.Phone, Deadline: deadline,
+		ReturnURL: s.ReturnURL, Name: o.Name, Email: o.Email, Phone: o.Phone, Deadline: deadline,
 	})
 	if err != nil {
 		// Nothing can be captured without a session we know about, so the
@@ -251,7 +253,11 @@ func (s *Service) finalize(ctx context.Context, attemptID string, res Result) er
 		if err != nil {
 			return err
 		}
-		if !open(a.Status) {
+		// A closed attempt changes only if the provider reports a capture we
+		// had given up on (a provider that captures in its own page, after we
+		// marked the attempt failed): that money must still be accounted for.
+		reopened := res.Status == Succeeded && (a.Status == "failed" || a.Status == "abandoned")
+		if !open(a.Status) && !reopened {
 			return nil
 		}
 		if err := event(ctx, tx, a.ID, "result", map[string]any{
@@ -295,6 +301,38 @@ func (s *Service) finalize(ctx context.Context, attemptID string, res Result) er
 			VALUES ($1, $2, $3, $4, $5)`, newRef("RF"), a.ID, res.AmountMinor, res.Currency, reason)
 		return err
 	})
+}
+
+// Notify handles a provider's server-to-server notification. The body only
+// says which payment to look at; the provider is queried for the facts, and
+// the notification is recorded before anything changes. Repeats are harmless.
+func (s *Service) Notify(ctx context.Context, body []byte) error {
+	n, ok := s.Gateway.(Notifier)
+	if !ok {
+		return ErrNotifyUnsupported
+	}
+	ref, err := n.ParseNotification(body)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnknownPayment, err)
+	}
+	a, err := s.attemptWhere(ctx, s.DB, `a.provider = $1 AND a.provider_ref = $2`, s.Gateway.Provider(), ref)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrUnknownPayment
+	}
+	if err != nil {
+		return err
+	}
+	if err := event(ctx, s.DB, a.ID, "notification", nil); err != nil {
+		return err
+	}
+	if a.Status == "succeeded" || a.Status == "review" {
+		return nil
+	}
+	res, err := s.Gateway.Query(ctx, ref)
+	if err != nil {
+		return err
+	}
+	return s.finalize(ctx, a.ID, res)
 }
 
 // Reconcile settles attempts left open (closed browser, lost redirect,

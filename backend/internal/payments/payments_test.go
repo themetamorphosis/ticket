@@ -644,3 +644,120 @@ func TestEveryFailurePointKeepsTheBooksBalanced(t *testing.T) {
 		pgtest.EachFault(t, e.pool, op, func(int, error) {})
 	}
 }
+
+// notifyingGateway captures in its own page and sends notifications, as
+// PayStation does. It also records the last StartRequest.
+type notifyingGateway struct {
+	providerCaptures
+	started payments.StartRequest
+}
+
+func (g *notifyingGateway) Start(ctx context.Context, req payments.StartRequest) (payments.Started, error) {
+	g.started = req
+	return g.providerCaptures.Start(ctx, req)
+}
+
+func (*notifyingGateway) ParseNotification(body []byte) (string, error) {
+	if len(body) == 0 {
+		return "", errors.New("empty")
+	}
+	return string(body), nil
+}
+
+func TestNotificationsAreVerifiedWithTheProvider(t *testing.T) {
+	e := setup(t)
+	gw := &notifyingGateway{providerCaptures: providerCaptures{e.gw}}
+	e.svc.Gateway = gw
+	buyer, ref := e.reserve()
+	redirect := e.checkout(buyer, ref)
+	if gw.started.Name != "Nusrat Jahan" || gw.started.Email != "nusrat@example.com" || gw.started.Phone != "+8801711000000" {
+		t.Fatalf("start request %+v", gw.started)
+	}
+	pref := providerRef(redirect)
+
+	// A notification before the provider shows a capture changes nothing.
+	if err := e.svc.Notify(ctx, []byte(pref)); err != nil || e.orderStatus(ref) != "held" {
+		t.Fatalf("early notify: %v %s", err, e.orderStatus(ref))
+	}
+	_, _ = e.gw.Decide(ctx, pref, "approve")
+	_, _ = e.gw.Complete(ctx, pref) // captured inside the provider's page
+	e.gw.FailNext("query", errors.New("timeout"))
+	if err := e.svc.Notify(ctx, []byte(pref)); err == nil {
+		t.Fatal("query failure not reported, so the provider would not retry")
+	}
+	if err := e.svc.Notify(ctx, []byte(pref)); err != nil || e.orderStatus(ref) != "paid" {
+		t.Fatalf("notify: %v %s", err, e.orderStatus(ref))
+	}
+	// Repeated notifications are acknowledged without changes.
+	if err := e.svc.Notify(ctx, []byte(pref)); err != nil {
+		t.Fatal(err)
+	}
+	var notes int
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM payment_event WHERE kind = 'notification'`).Scan(&notes)
+	if notes != 4 {
+		t.Fatalf("%d notifications recorded", notes)
+	}
+	for _, body := range [][]byte{nil, []byte("FAKE-unknown")} {
+		if err := e.svc.Notify(ctx, body); !errors.Is(err, payments.ErrUnknownPayment) {
+			t.Errorf("Notify(%q) = %v", body, err)
+		}
+	}
+	e.assertBooks()
+}
+
+func TestNotifyUnsupportedProvider(t *testing.T) {
+	e := setup(t)
+	if err := e.svc.Notify(ctx, []byte("x")); !errors.Is(err, payments.ErrNotifyUnsupported) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// A provider that captures in its own page can report a capture after we
+// marked the attempt failed (the buyer said cancel, then paid anyway). The
+// money is still accounted for: sold if the hold lasts, refunded if not.
+func TestLateCaptureReopensAClosedAttempt(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		e := setup(t)
+		e.svc.Gateway = &notifyingGateway{providerCaptures: providerCaptures{e.gw}}
+		buyer, ref := e.reserve()
+		redirect := e.checkout(buyer, ref)
+		pref := providerRef(redirect)
+		back, _ := e.gw.Decide(ctx, pref, "decline")
+		u, _ := url.Parse(back)
+		_, _ = e.svc.Return(ctx, u.Query())
+		if fmt.Sprint(e.attemptStatuses(ref)) != "[failed]" {
+			t.Fatalf("attempts %v", e.attemptStatuses(ref))
+		}
+		// The provider nonetheless captured.
+		_, _ = e.pool.Exec(ctx, `UPDATE fake_gateway_payment SET state = 'captured', trx_id = 'TRX-late' WHERE ref = $1`, pref)
+		if expired {
+			e.expire(ref)
+		}
+		if err := e.svc.Notify(ctx, []byte(pref)); err != nil {
+			t.Fatal(err)
+		}
+		want := "paid"
+		if expired {
+			want = "expired"
+		}
+		if e.orderStatus(ref) != want || fmt.Sprint(e.attemptStatuses(ref)) != "[succeeded]" {
+			t.Fatalf("expired=%v: order %s attempts %v", expired, e.orderStatus(ref), e.attemptStatuses(ref))
+		}
+		l := e.assertBooks()
+		if expired && l.RefundOpenMinor != 310000 {
+			t.Fatalf("ledger %+v", l)
+		}
+	}
+}
+
+func TestNotifyUnderDatabaseFailures(t *testing.T) {
+	e := setup(t)
+	pgtest.EachFault(t, e.pool, func(db dbx.DB) error {
+		buyer, ref := e.reserve()
+		pref := providerRef(e.checkout(buyer, ref))
+		_, _ = e.gw.Decide(ctx, pref, "approve")
+		_, _ = e.gw.Complete(ctx, pref)
+		svc := &payments.Service{DB: db, Gateway: &notifyingGateway{providerCaptures: providerCaptures{e.gw}}}
+		return svc.Notify(ctx, []byte(pref))
+	}, func(int, error) { e.assertBooks() })
+}

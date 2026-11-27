@@ -196,27 +196,6 @@ func (g *Gateway) token(ctx context.Context) (string, error) {
 	return tok, err
 }
 
-// ---------- Amounts ----------
-
-func formatAmount(minor int64) string { return fmt.Sprintf("%d.%02d", minor/100, minor%100) }
-
-// parseAmount reads "20", "20.5" or "20.00" into minor units.
-func parseAmount(s string) (int64, error) {
-	whole, frac, _ := strings.Cut(s, ".")
-	if len(frac) > 2 {
-		return 0, fmt.Errorf("bkash: amount %q has more than two decimals", s)
-	}
-	w, err := strconv.ParseInt(whole, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("bkash: amount %q: %w", s, err)
-	}
-	f, err := strconv.ParseInt((frac + "00")[:2], 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("bkash: amount %q: %w", s, err)
-	}
-	return w*100 + f, nil
-}
-
 // ---------- Gateway ----------
 
 // payerReference prefills a Bangladeshi wallet number on the bKash page.
@@ -236,7 +215,7 @@ func (g *Gateway) Start(ctx context.Context, req payments.StartRequest) (payment
 		"mode":                  "0011",
 		"payerReference":        payerReference(req.Phone, req.MerchantRef),
 		"callbackURL":           req.ReturnURL,
-		"amount":                formatAmount(req.AmountMinor),
+		"amount":                payments.FormatAmount(req.AmountMinor),
 		"currency":              req.Currency,
 		"intent":                "sale",
 		"merchantInvoiceNumber": req.MerchantRef,
@@ -279,7 +258,7 @@ func (p paymentResponse) result(ref string) (payments.Result, error) {
 	switch {
 	case p.TransactionStatus == "Completed":
 		res.Status = payments.Succeeded
-		amount, err := parseAmount(p.Amount)
+		amount, err := payments.ParseAmount(p.Amount)
 		if err != nil {
 			return payments.Result{}, fmt.Errorf("%w: %v", ErrUnknown, err)
 		}
@@ -351,7 +330,7 @@ func (g *Gateway) Refund(ctx context.Context, req payments.RefundRequest) (payme
 		return payments.RefundResult{}, err
 	}
 	for _, r := range status.Refunds {
-		if amount, _ := parseAmount(r.Amount); r.Status == "Completed" && amount == req.AmountMinor {
+		if amount, _ := payments.ParseAmount(r.Amount); r.Status == "Completed" && amount == req.AmountMinor {
 			return payments.RefundResult{Status: payments.RefundCompleted, ProviderRefundID: r.ID}, nil
 		}
 	}
@@ -367,7 +346,7 @@ func (g *Gateway) Refund(ctx context.Context, req payments.RefundRequest) (payme
 	err = g.call(ctx, "/refund/payment/transaction", true, map[string]string{
 		"paymentId":    req.ProviderRef,
 		"trxId":        req.TrxID,
-		"refundAmount": formatAmount(req.AmountMinor),
+		"refundAmount": payments.FormatAmount(req.AmountMinor),
 		"sku":          "ticket",
 		"reason":       reason,
 	}, &out)

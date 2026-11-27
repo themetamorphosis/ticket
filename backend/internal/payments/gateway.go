@@ -52,8 +52,10 @@ type StartRequest struct {
 	AmountMinor int64
 	Currency    string
 	ReturnURL   string
-	// Phone is the buyer's E.164 number, used to prefill the wallet when the
-	// provider supports it.
+	// Name, Email and Phone (E.164) describe the buyer; providers use them
+	// to prefill or as required customer fields.
+	Name  string
+	Email string
 	Phone string
 	// Deadline is when the hold ends. Providers that capture inside their own
 	// page should close the session before it.
@@ -111,4 +113,11 @@ type Gateway interface {
 	Query(ctx context.Context, providerRef string) (Result, error)
 	// Refund must be idempotent per RefundRef.
 	Refund(ctx context.Context, req RefundRequest) (RefundResult, error)
+}
+
+// Notifier is implemented by providers that send server-to-server payment
+// notifications. The body is untrusted: it only names which payment to ask
+// the provider about.
+type Notifier interface {
+	ParseNotification(body []byte) (providerRef string, err error)
 }
