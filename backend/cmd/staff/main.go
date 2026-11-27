@@ -39,16 +39,15 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		return err
 	}
 	origin := getenv("GATE_ORIGIN")
+	if err := config.CheckOrigin(origin); err != nil {
+		return err
+	}
 	pool, err := postgres.Open(ctx, dbURL)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	auth, err := staffauth.New(pool, origin)
-	if err != nil {
-		return err
-	}
-	token, err := auth.Invite(ctx, audit.Actor{Kind: "system"}, args[1], args[2], args[3])
+	token, err := staffauth.New(pool).Invite(ctx, audit.Actor{Kind: "system"}, args[1], args[2], args[3])
 	if err != nil {
 		return err
 	}

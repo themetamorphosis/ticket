@@ -1,6 +1,5 @@
-// Package staffauth authenticates staff with a password (Argon2id) and a
-// WebAuthn security key or passkey (plan section 7). Accounts exist only by
-// invitation; a staff session is valid only while its epoch matches, so
+// Package staffauth authenticates staff with a password (Argon2id). There is
+// deliberately no second factor. Accounts exist only by invitation; a staff session is valid only while its epoch matches, so
 // revoking a person or changing their role ends every session they hold.
 package staffauth
 

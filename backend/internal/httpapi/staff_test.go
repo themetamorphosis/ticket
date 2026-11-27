@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/alexedwards/scs/v2"
-	"github.com/descope/virtualwebauthn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"kacheem/backend/internal/audit"
@@ -32,18 +31,7 @@ import (
 
 const staffOrigin = "https://gate.test"
 
-var staffRP = virtualwebauthn.RelyingParty{ID: "gate.test", Name: "Kacheem Comms staff", Origin: staffOrigin}
-
 const staffPassword = "correct horse battery staple"
-
-type securityKey struct {
-	auth virtualwebauthn.Authenticator
-	cred virtualwebauthn.Credential
-}
-
-func newSecurityKey() *securityKey {
-	return &securityKey{auth: virtualwebauthn.NewAuthenticator(), cred: virtualwebauthn.NewCredential(virtualwebauthn.KeyTypeEC2)}
-}
 
 type staffEnv struct {
 	t        *testing.T
@@ -54,7 +42,6 @@ type staffEnv struct {
 	srv      *httptest.Server
 	dir      string
 	eventID  string
-	keys     map[string]*securityKey
 	n        int
 }
 
@@ -66,8 +53,8 @@ func newStaffEnv(t *testing.T, publishDir bool) *staffEnv {
 	k := make([]byte, 32)
 	_, _ = rand.Read(k)
 	box, _ := sealbox.New(k)
-	auth, _ := staffauth.New(pool, staffOrigin)
-	e := &staffEnv{t: t, pool: pool, auth: auth, iss: &tickets.Issuer{Box: box}, eventID: ids.EventID, keys: map[string]*securityKey{}}
+	auth := staffauth.New(pool)
+	e := &staffEnv{t: t, pool: pool, auth: auth, iss: &tickets.Issuer{Box: box}, eventID: ids.EventID}
 	if publishDir {
 		e.dir = t.TempDir()
 	}
@@ -84,23 +71,17 @@ func (e *staffEnv) handler(db dbx.DB) http.Handler {
 		PublishDir: e.dir, Logger: slog.New(slog.DiscardHandler)})
 }
 
-// enroll creates an active staff member with a security key, directly.
+// enroll creates an active staff member, directly.
 func (e *staffEnv) enroll(email, role string) string {
 	e.t.Helper()
 	token, err := e.auth.Invite(context.Background(), audit.Actor{Kind: "system"}, email, "Staff "+role, role)
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	c, _ := e.auth.BeginInvite(context.Background(), token, staffPassword)
-	key := newSecurityKey()
-	opts, _ := virtualwebauthn.ParseAttestationOptions(string(c.Options))
-	resp := virtualwebauthn.CreateAttestationResponse(staffRP, key.auth, key.cred, *opts)
-	key.auth.AddCredential(key.cred)
-	st, err := e.auth.FinishInvite(context.Background(), token, c.State, strings.NewReader(resp))
+	st, err := e.auth.AcceptInvite(context.Background(), token, staffPassword)
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	e.keys[email] = key
 	return st.ID
 }
 
@@ -111,29 +92,13 @@ func (e *staffEnv) browser() *browser {
 	return b
 }
 
-// rawPost posts a raw body (a WebAuthn response) with the staff CSRF headers.
-func (b *browser) rawPost(path, body string) response {
-	b.t.Helper()
-	return b.do("POST", path, body, map[string]string{"Origin": staffOrigin, session.CSRFHeader: b.csrf, "Content-Type": "application/json"})
-}
-
-// signIn signs a staff member in through the API with their security key.
+// signIn signs a staff member in through the API.
 func (e *staffEnv) signIn(email string) *browser {
 	e.t.Helper()
 	b := e.browser()
-	r := b.write("/api/v1/staff/login/begin", map[string]string{"email": email, "password": staffPassword}, "")
+	r := b.write("/api/v1/staff/login", map[string]string{"email": email, "password": staffPassword}, "")
 	if r.status != 200 {
-		e.t.Fatalf("login begin %d %v", r.status, r.body)
-	}
-	key := e.keys[email]
-	raw, _ := jsonMarshal(r.body["options"])
-	opts, err := virtualwebauthn.ParseAssertionOptions(raw)
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	fin := b.rawPost("/api/v1/staff/login/finish", virtualwebauthn.CreateAssertionResponse(staffRP, key.auth, key.cred, *opts))
-	if fin.status != 200 {
-		e.t.Fatalf("login finish %d %v", fin.status, fin.body)
+		e.t.Fatalf("login %d %v", r.status, r.body)
 	}
 	b.startSession() // the token was renewed at sign-in
 	return b
@@ -187,28 +152,25 @@ func TestStaffSignInAndInvitations(t *testing.T) {
 	}
 	token := strings.TrimPrefix(inviteURL, staffOrigin+"/invite/#")
 	newcomer := e.browser()
-	if r := newcomer.write("/api/v1/staff/invite/begin", map[string]string{"token": token, "password": "short"}, ""); r.status != 422 ||
-		r.errCode() != "weak_password" {
+	accept := func(token, password string) response {
+		return newcomer.write("/api/v1/staff/invite/accept", map[string]string{"token": token, "password": password}, "")
+	}
+	if r := accept(token, "short"); r.status != 422 || r.errCode() != "weak_password" {
 		t.Fatalf("weak %d %v", r.status, r.body)
 	}
-	if r := newcomer.write("/api/v1/staff/invite/begin", map[string]string{"token": "nope", "password": staffPassword}, ""); r.status != 404 {
-		t.Fatalf("bad token %d", r.status)
+	if r := accept("nope", staffPassword); r.status != 404 || r.errCode() != "invite_invalid" {
+		t.Fatalf("bad token %d %v", r.status, r.body)
 	}
-	begin := newcomer.write("/api/v1/staff/invite/begin", map[string]string{"token": token, "password": staffPassword}, "")
-	raw, _ := jsonMarshal(begin.body["options"])
-	opts, _ := virtualwebauthn.ParseAttestationOptions(raw)
-	key := newSecurityKey()
-	resp := virtualwebauthn.CreateAttestationResponse(staffRP, key.auth, key.cred, *opts)
-	key.auth.AddCredential(key.cred)
-	if r := newcomer.rawPost("/api/v1/staff/invite/finish", resp); r.status != 200 || r.body["staff"].(map[string]any)["role"] != "gate" {
-		t.Fatalf("finish %d %v", r.status, r.body)
+	if r := newcomer.write("/api/v1/staff/invite/accept", "not json", ""); r.status != 400 {
+		t.Fatalf("bad invite json %d", r.status)
+	}
+	if r := accept(token, staffPassword); r.status != 200 || r.body["staff"].(map[string]any)["role"] != "gate" {
+		t.Fatalf("accept %d %v", r.status, r.body)
 	}
 	newcomer.startSession()
 	if r := newcomer.do("GET", "/api/v1/staff/me", nil, nil); r.status != 200 {
 		t.Fatalf("newcomer me %d", r.status)
 	}
-	e.keys["gate@example.org"] = key
-
 	// Invitation errors.
 	for body, code := range map[string]string{
 		`{"email":"x","name":"X","role":"gate"}`:                "invalid",
@@ -221,19 +183,15 @@ func TestStaffSignInAndInvitations(t *testing.T) {
 
 	// Sign-in failures all look the same.
 	failing := e.browser()
-	if r := failing.write("/api/v1/staff/login/begin", map[string]string{"email": "org@example.org", "password": "nope nope nope"}, ""); r.status != 401 ||
+	if r := failing.write("/api/v1/staff/login", map[string]string{"email": "org@example.org", "password": "nope nope nope"}, ""); r.status != 401 ||
 		r.errCode() != "sign_in_failed" {
 		t.Fatalf("wrong password %d %v", r.status, r.body)
 	}
-	failing.write("/api/v1/staff/login/begin", map[string]string{"email": "org@example.org", "password": staffPassword}, "")
-	if r := failing.rawPost("/api/v1/staff/login/finish", "{}"); r.status != 401 {
-		t.Fatalf("bad assertion %d", r.status)
-	}
-	if r := failing.write("/api/v1/staff/login/begin", "not json", ""); r.status != 400 {
+	if r := failing.write("/api/v1/staff/login", "not json", ""); r.status != 400 {
 		t.Fatalf("bad json %d", r.status)
 	}
 	// Writes need the staff origin and CSRF token.
-	if r := failing.do("POST", "/api/v1/staff/login/begin", `{}`, map[string]string{"Origin": "https://tickets.test", session.CSRFHeader: failing.csrf}); r.status != 403 {
+	if r := failing.do("POST", "/api/v1/staff/login", `{}`, map[string]string{"Origin": "https://tickets.test", session.CSRFHeader: failing.csrf}); r.status != 403 {
 		t.Fatalf("buyer origin %d", r.status)
 	}
 
@@ -565,7 +523,7 @@ func TestStaffRoutesUnderDatabaseFailures(t *testing.T) {
 		},
 		func(b *browser) int { return b.do("GET", "/api/v1/ops/audit", nil, nil).status },
 		func(b *browser) int {
-			return b.write("/api/v1/staff/login/begin", map[string]string{"email": "org@example.org", "password": staffPassword}, "").status
+			return b.write("/api/v1/staff/login", map[string]string{"email": "org@example.org", "password": staffPassword}, "").status
 		},
 	}
 	for i, req := range requests {
@@ -637,12 +595,8 @@ func TestSessionStoreFailuresAtSignInAndOut(t *testing.T) {
 	}
 	fail = false
 	b := e.browser()
-	r := b.write("/api/v1/staff/login/begin", map[string]string{"email": "org@example.org", "password": staffPassword}, "")
-	raw, _ := jsonMarshal(r.body["options"])
-	opts, _ := virtualwebauthn.ParseAssertionOptions(raw)
-	key := e.keys["org@example.org"]
 	fail = true
-	if fin := b.rawPost("/api/v1/staff/login/finish", virtualwebauthn.CreateAssertionResponse(staffRP, key.auth, key.cred, *opts)); fin.status != 500 {
-		t.Fatalf("renew failure %d %v", fin.status, fin.body)
+	if r := b.write("/api/v1/staff/login", map[string]string{"email": "org@example.org", "password": staffPassword}, ""); r.status != 500 {
+		t.Fatalf("renew failure %d %v", r.status, r.body)
 	}
 }

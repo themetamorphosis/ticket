@@ -212,3 +212,19 @@ func TestDeliveryConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestGateOriginMustBeAURLWithAHost(t *testing.T) {
+	for _, bad := range []string{"::not a url", "gate.example.org", "https://"} {
+		m := fullAPIEnv()
+		m["GATE_ORIGIN"] = bad
+		if _, err := LoadAPI(env(m)); err == nil || !strings.Contains(err.Error(), "GATE_ORIGIN") {
+			t.Errorf("GATE_ORIGIN=%q: got err %v", bad, err)
+		}
+		if err := CheckOrigin(bad); err == nil {
+			t.Errorf("CheckOrigin accepted %q", bad)
+		}
+	}
+	if err := CheckOrigin("http://localhost:8089"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -75,7 +76,20 @@ func loadDelivery(getenv func(string) string, errs *[]error) Delivery {
 		*errs = append(*errs, fmt.Errorf("SMS_PROVIDER must be fake until an SMS aggregator is integrated, got %q", d.SMSProvider))
 	}
 	d.GateOrigin = strings.TrimRight(d.GateOrigin, "/")
+	if d.GateOrigin != "" {
+		if err := CheckOrigin(d.GateOrigin); err != nil {
+			*errs = append(*errs, err)
+		}
+	}
 	return d
+}
+
+// CheckOrigin reports whether a GATE_ORIGIN value is a URL naming a host.
+func CheckOrigin(origin string) error {
+	if u, err := url.Parse(origin); err != nil || u.Hostname() == "" {
+		return fmt.Errorf("GATE_ORIGIN %q is not a URL", origin)
+	}
+	return nil
 }
 
 // Payment selects and configures the payment gateway. Provider "fake" is the

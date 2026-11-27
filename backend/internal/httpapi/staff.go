@@ -42,9 +42,6 @@ type StaffDeps struct {
 const (
 	keyStaffID = "staff_id"
 	keyEpoch   = "staff_epoch"
-	keyState   = "webauthn_state"
-	keyPending = "webauthn_staff"
-	keyInvite  = "invite_token"
 	orgFinSup  = "organizer,finance,support"
 	orgSup     = "organizer,support"
 	orgFin     = "organizer,finance"
@@ -58,10 +55,8 @@ func NewStaff(d StaffDeps) http.Handler {
 	s := &staffAPI{d}
 	mux := baseMux(d.Checks)
 	get(mux, "/api/v1/session", s.csrf)
-	post(mux, "/api/v1/staff/login/begin", s.protect(s.loginBegin))
-	post(mux, "/api/v1/staff/login/finish", s.protect(s.loginFinish))
-	post(mux, "/api/v1/staff/invite/begin", s.protect(s.inviteBegin))
-	post(mux, "/api/v1/staff/invite/finish", s.protect(s.inviteFinish))
+	post(mux, "/api/v1/staff/login", s.protect(s.login))
+	post(mux, "/api/v1/staff/invite/accept", s.protect(s.acceptInvite))
 	post(mux, "/api/v1/staff/logout", s.protect(s.logout))
 	get(mux, "/api/v1/staff/me", s.as("organizer,finance,support,gate", s.me))
 
@@ -145,7 +140,34 @@ func staffJSON(st staffauth.Staff) map[string]string {
 
 // ---------- Sign-in ----------
 
-func (s *staffAPI) ceremony(w http.ResponseWriter, r *http.Request, c staffauth.Ceremony, err error) {
+func (s *staffAPI) login(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if decode(w, r, &body) {
+		st, err := s.Auth.SignIn(r.Context(), body.Email, body.Password)
+		s.signIn(w, r, st, err)
+	}
+}
+
+func (s *staffAPI) acceptInvite(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token    string `json:"token"`
+		Password string `json:"password"`
+	}
+	if decode(w, r, &body) {
+		st, err := s.Auth.AcceptInvite(r.Context(), body.Token, body.Password)
+		s.signIn(w, r, st, err)
+	}
+}
+
+// signIn starts an authenticated session on a fresh token.
+func (s *staffAPI) signIn(w http.ResponseWriter, r *http.Request, st staffauth.Staff, err error) {
+	ctx := r.Context()
+	if err == nil {
+		err = s.Sessions.RenewToken(ctx)
+	}
 	switch {
 	case errors.Is(err, staffauth.ErrLogin):
 		writeError(w, http.StatusUnauthorized, "sign_in_failed", "Those details did not match. Check them and try again.")
@@ -156,68 +178,10 @@ func (s *staffAPI) ceremony(w http.ResponseWriter, r *http.Request, c staffauth.
 	case err != nil:
 		s.internal(w, r, err)
 	default:
-		s.Sessions.Put(r.Context(), keyState, string(c.State))
-		s.Sessions.Put(r.Context(), keyPending, c.StaffID)
-		writeJSON(w, http.StatusOK, map[string]json.RawMessage{"options": c.Options})
-	}
-}
-
-func (s *staffAPI) loginBegin(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	if decode(w, r, &body) {
-		c, err := s.Auth.BeginLogin(r.Context(), body.Email, body.Password)
-		s.ceremony(w, r, c, err)
-	}
-}
-
-func (s *staffAPI) inviteBegin(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Token    string `json:"token"`
-		Password string `json:"password"`
-	}
-	if decode(w, r, &body) {
-		c, err := s.Auth.BeginInvite(r.Context(), body.Token, body.Password)
-		if err == nil {
-			s.Sessions.Put(r.Context(), keyInvite, body.Token)
-		}
-		s.ceremony(w, r, c, err)
-	}
-}
-
-// signIn starts an authenticated session on a fresh token.
-func (s *staffAPI) signIn(w http.ResponseWriter, r *http.Request, st staffauth.Staff, err error) {
-	ctx := r.Context()
-	s.Sessions.Remove(ctx, keyState)
-	s.Sessions.Remove(ctx, keyPending)
-	s.Sessions.Remove(ctx, keyInvite)
-	if err == nil {
-		err = s.Sessions.RenewToken(ctx)
-	}
-	switch {
-	case errors.Is(err, staffauth.ErrLogin), errors.Is(err, staffauth.ErrInvite):
-		writeError(w, http.StatusUnauthorized, "sign_in_failed", "The security key check failed. Start again.")
-	case err != nil:
-		s.internal(w, r, err)
-	default:
 		s.Sessions.Put(ctx, keyStaffID, st.ID)
 		s.Sessions.Put(ctx, keyEpoch, st.Epoch)
 		writeJSON(w, http.StatusOK, map[string]any{"staff": staffJSON(st)})
 	}
-}
-
-func (s *staffAPI) loginFinish(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	st, err := s.Auth.FinishLogin(ctx, s.Sessions.GetString(ctx, keyPending), []byte(s.Sessions.GetString(ctx, keyState)), r.Body)
-	s.signIn(w, r, st, err)
-}
-
-func (s *staffAPI) inviteFinish(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	st, err := s.Auth.FinishInvite(ctx, s.Sessions.GetString(ctx, keyInvite), []byte(s.Sessions.GetString(ctx, keyState)), r.Body)
-	s.signIn(w, r, st, err)
 }
 
 func (s *staffAPI) logout(w http.ResponseWriter, r *http.Request) {

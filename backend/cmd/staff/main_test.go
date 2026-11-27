@@ -36,7 +36,7 @@ func TestFailures(t *testing.T) {
 	}{
 		"usage":         {[]string{"remove", "a", "b", "c"}, nil},
 		"config":        {[]string{"invite", "a", "b", "c"}, nil},
-		"database down": {[]string{"invite", "a", "b", "c"}, map[string]string{"DATABASE_URL": "postgres://app:x@127.0.0.1:1/x?connect_timeout=1"}},
+		"database down": {[]string{"invite", "a", "b", "c"}, map[string]string{"DATABASE_URL": "postgres://app:x@127.0.0.1:1/x?connect_timeout=1", "GATE_ORIGIN": "https://gate.test"}},
 		"bad origin":    {[]string{"invite", "a", "b", "c"}, map[string]string{"DATABASE_URL": pool.Config().ConnString(), "GATE_ORIGIN": "::x"}},
 	} {
 		if err := run(context.Background(), c.args, getter(c.env), io.Discard); err == nil {

@@ -74,10 +74,7 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	pay := &payments.Service{DB: pool, Gateway: gw, ReturnURL: cfg.PublicOrigin + "/payments/return/" + gw.Provider(),
 		// A paid order's tickets commit in the same transaction as its payment.
 		OnPaid: issuer.IssueInTx}
-	staffAuth, err := staffauth.New(pool, cfg.Delivery.GateOrigin)
-	if err != nil {
-		return err
-	}
+	staffAuth := staffauth.New(pool)
 	var devOutbox http.Handler
 	if delivery.UsesDevChannels(cfg.Delivery) {
 		devOutbox = delivery.DevOutbox(pool)
