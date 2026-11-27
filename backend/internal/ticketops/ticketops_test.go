@@ -204,6 +204,48 @@ func TestRefundBlocksAtOnceAndVoidsWhenSettled(t *testing.T) {
 	}
 }
 
+// An offline sale's money is handed back by the desk, so its refund is
+// settled when it is recorded and the tickets stop working at once.
+func TestOfflineRefundSettlesAtOnce(t *testing.T) {
+	e := setup(t)
+	o, _, err := orders.SellOffline(ctx, e.pool, orders.OfflineSale{EventSlug: "live", StaffID: e.staff,
+		IdempotencyKey: "offline-0001", Method: "cash",
+		Input: orders.Input{Quantity: 2, Name: "A Buyer", Email: "a@example.com", Phone: "+8801711000000", Age: 30}},
+		e.iss.IssueInTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	rows, _ := e.pool.Query(ctx, `SELECT id::text FROM ticket WHERE order_id = $1 ORDER BY ordinal`, o.ID)
+	for rows.Next() {
+		var id string
+		_ = rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("issued %d tickets", len(ids))
+	}
+	if err := RequestRefund(ctx, e.pool, e.staff, o.ID, "buyer cannot come"); err != nil {
+		t.Fatal(err)
+	}
+	if e.status(ids[0]) != "void" || e.status(ids[1]) != "void" || e.audits("order.refund_requested") != 1 {
+		t.Fatal("offline refund did not void the tickets")
+	}
+	var status, providerID string
+	_ = e.pool.QueryRow(ctx, `SELECT r.status, r.provider_refund_id FROM refund r
+		JOIN payment_attempt a ON a.id = r.attempt_id WHERE a.order_id = $1`, o.ID).Scan(&status, &providerID)
+	if status != "completed" || providerID != "manual" {
+		t.Fatalf("refund %s %s", status, providerID)
+	}
+	// The gateway's refund worker never touches it.
+	if n, err := e.svc.ProcessRefunds(ctx, 10); err != nil || n != 0 {
+		t.Fatalf("worker took %d offline refunds (%v)", n, err)
+	}
+	if l, _ := payments.GetLedger(ctx, e.pool); !l.Balanced() || l.RefundedMinor != 300000 || l.RefundOpenMinor != 0 {
+		t.Fatalf("ledger %+v", l)
+	}
+}
+
 func TestRefundRefusals(t *testing.T) {
 	e := setup(t)
 	orderID, ids := e.paid(2)

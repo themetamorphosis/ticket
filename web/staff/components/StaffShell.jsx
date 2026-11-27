@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, resetSessionCache } from '../lib/api';
 import {
   AccountBalance as AccountBalanceIcon,
+  ConfirmationNumber as ConfirmationNumberIcon,
   Dashboard as DashboardIcon,
   Event as EventIcon,
   Groups as GroupsIcon,
@@ -38,6 +39,7 @@ const PAGES = [
   { href: '/', label: 'Overview', icon: DashboardIcon, roles: ['organizer', 'finance', 'support', 'gate'] },
   { href: '/scan/', label: 'Scanner', icon: QrCodeScannerIcon, roles: ['organizer', 'gate'] },
   { href: '/orders/', label: 'Orders', icon: ReceiptLongIcon, roles: ['organizer', 'finance', 'support'] },
+  { href: '/sell/', label: 'Sell offline', icon: ConfirmationNumberIcon, roles: ['organizer', 'finance', 'support'] },
   { href: '/finance/', label: 'Finance', icon: AccountBalanceIcon, roles: ['organizer', 'finance'] },
   { href: '/event/', label: 'Event', icon: EventIcon, roles: ['organizer'] },
   { href: '/people/', label: 'Gates and staff', icon: GroupsIcon, roles: ['organizer'] },

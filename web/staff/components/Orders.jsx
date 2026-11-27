@@ -30,6 +30,8 @@ import { EmptyState, LoadingState } from './States';
 import { StatusChip } from './StatusChip';
 import { useLoad } from './useLoad';
 
+const PAID_BY = { cash: 'cash', bank: 'bank transfer', bkash: 'bKash' };
+
 export function Orders({ me, initialRef = null }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState(null);
@@ -190,10 +192,17 @@ function OrderDetail({ orderRef, role }) {
           <List dense disablePadding>
             {data.attempts.map((a) => (
               <ListItem key={a.created_at} disableGutters>
-                <ListItemText
-                  primary={`${a.provider} · ${a.status} · ${money(a.amount_minor)}`}
-                  secondary={`${a.provider_trx_id ?? 'no transaction'} · ${when(a.created_at)}`}
-                />
+                {a.offline_method ? (
+                  <ListItemText
+                    primary={`Offline, ${PAID_BY[a.offline_method]} · ${a.status} · ${money(a.amount_minor)}`}
+                    secondary={`Received by ${a.received_by} · ${a.offline_reference ?? 'no reference'} · receipt ${a.provider_trx_id} · ${when(a.created_at)}`}
+                  />
+                ) : (
+                  <ListItemText
+                    primary={`${a.provider} · ${a.status} · ${money(a.amount_minor)}`}
+                    secondary={`${a.provider_trx_id ?? 'no transaction'} · ${when(a.created_at)}`}
+                  />
+                )}
               </ListItem>
             ))}
             {data.refunds.map((r) => (

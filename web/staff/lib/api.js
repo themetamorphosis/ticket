@@ -50,9 +50,9 @@ export function resetSessionCache() {
   csrf = null;
 }
 
-export async function write(path, body) {
+export async function write(path, body, headers = {}) {
   const token = await csrfToken();
-  return request(path, { method: 'POST', body, headers: { 'X-CSRF-Token': token } });
+  return request(path, { method: 'POST', body, headers: { ...headers, 'X-CSRF-Token': token } });
 }
 
 const enc = encodeURIComponent;
@@ -67,6 +67,8 @@ export const api = {
   summary: (slug) => request(`/api/v1/ops/events/${enc(slug)}/summary`),
   searchOrders: (q) => request(`/api/v1/ops/orders?q=${enc(q)}`),
   order: (ref) => request(`/api/v1/ops/orders/${enc(ref)}`),
+  // The same key on a retry returns the first sale instead of selling twice.
+  sellOffline: (slug, sale, key) => write(`/api/v1/ops/events/${enc(slug)}/offline-sales`, sale, { 'Idempotency-Key': key }),
   resend: (ref) => write(`/api/v1/ops/orders/${enc(ref)}/resend`),
   refund: (ref, reason) => write(`/api/v1/ops/orders/${enc(ref)}/refund`, { reason }),
   reissue: (id, reason) => write(`/api/v1/ops/tickets/${enc(id)}/reissue`, { reason }),

@@ -398,6 +398,78 @@ func TestSupportAndFinanceActions(t *testing.T) {
 	}
 }
 
+func TestOfflineSaleThroughTheAPI(t *testing.T) {
+	e := newStaffEnv(t, false)
+	e.enroll("support@example.org", "support")
+	e.enroll("finance@example.org", "finance")
+	e.enroll("gate@example.org", "gate")
+	support := e.signIn("support@example.org")
+	ev := support.do("GET", "/api/v1/staff/me", nil, nil).body["events"].([]any)[0].(map[string]any)
+	if ev["price_minor"] != float64(150000) || ev["currency"] != "BDT" {
+		t.Fatalf("me events %v", ev)
+	}
+	sale := map[string]any{"quantity": 2, "name": "Rahim Uddin", "email": "rahim@example.com", "phone": "+880 1811-000000",
+		"age": 34, "method": "bkash", "reference": "8AB12CD34E"}
+
+	r := support.write("/api/v1/ops/events/live/offline-sales", sale, "offline-sale-0001")
+	if r.status != 201 || r.body["status"] != "paid" || r.body["channel"] != "offline" || r.body["total_minor"] != float64(300000) ||
+		r.body["unit_fee_minor"] != float64(0) {
+		t.Fatalf("sale %d %v", r.status, r.body)
+	}
+	ref := r.body["ref"].(string)
+	var tickets, jobs int
+	_ = e.pool.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM ticket t JOIN ticket_order o ON o.id = t.order_id
+		WHERE o.public_ref = $1), (SELECT count(*) FROM outbox_job WHERE kind = 'render_tickets')`, ref).Scan(&tickets, &jobs)
+	if tickets != 2 || jobs != 1 {
+		t.Fatalf("tickets %d jobs %d", tickets, jobs)
+	}
+	if again := support.write("/api/v1/ops/events/live/offline-sales", sale, "offline-sale-0001"); again.status != 200 || again.body["ref"] != ref {
+		t.Fatalf("replay %d %v", again.status, again.body)
+	}
+	detail := support.do("GET", "/api/v1/ops/orders/"+ref, nil, nil)
+	attempt := detail.body["attempts"].([]any)[0].(map[string]any)
+	if detail.body["order"].(map[string]any)["channel"] != "offline" || attempt["offline_method"] != "bkash" ||
+		attempt["offline_reference"] != "8AB12CD34E" || attempt["received_by"] != "Staff support" {
+		t.Fatalf("detail %v", detail.body)
+	}
+	fin := e.signIn("finance@example.org").do("GET", "/api/v1/ops/finance", nil, nil)
+	if fin.body["ledger"].(map[string]any)["offline_bkash_minor"] != float64(300000) || fin.body["balanced"] != true {
+		t.Fatalf("finance %v", fin.body)
+	}
+
+	bad := map[string]any{"quantity": 1, "name": "", "email": "rahim@example.com", "phone": "+8801811000000", "age": 34, "method": "card"}
+	for name, c := range map[string]struct {
+		b      *browser
+		body   any
+		key    string
+		status int
+		code   string
+	}{
+		"no key":        {support, sale, "", 400, "bad_idempotency_key"},
+		"bad json":      {support, "nope", "offline-sale-0002", 400, "bad_json"},
+		"unknown field": {support, map[string]any{"price": 1}, "offline-sale-0002", 400, "bad_json"},
+		"invalid":       {support, bad, "offline-sale-0002", 422, "invalid"},
+		"changed":       {support, map[string]any{"quantity": 1, "name": "Rahim Uddin", "email": "rahim@example.com", "phone": "+8801811000000", "age": 34, "method": "cash"}, "offline-sale-0001", 422, "idempotency_key_reused"},
+		"gate role":     {e.signIn("gate@example.org"), sale, "offline-sale-0002", 403, "forbidden"},
+	} {
+		if r := c.b.write("/api/v1/ops/events/live/offline-sales", c.body, c.key); r.status != c.status || r.errCode() != c.code {
+			t.Errorf("%s: %d %v", name, r.status, r.body)
+		}
+	}
+	invalid := support.write("/api/v1/ops/events/live/offline-sales", bad, "offline-sale-0002")
+	if f := invalid.body["error"].(map[string]any)["fields"].(map[string]any); f["method"] == nil || f["name"] == nil {
+		t.Fatalf("fields %v", invalid.body)
+	}
+	if r := support.write("/api/v1/ops/events/nope/offline-sales", sale, "offline-sale-0003"); r.status != 404 || r.errCode() != "event_not_found" {
+		t.Fatalf("unknown event %d %v", r.status, r.body)
+	}
+	_, _ = e.pool.Exec(context.Background(), `UPDATE event SET starts_at = now() - interval '1 minute', doors_at = NULL`)
+	r = support.write("/api/v1/ops/events/live/offline-sales", sale, "offline-sale-0004")
+	if r.status != 409 || r.errCode() != "not_on_sale" || r.body["error"].(map[string]any)["state"] != "started" {
+		t.Fatalf("started %d %v", r.status, r.body)
+	}
+}
+
 func TestOrganizerManagesTheEvent(t *testing.T) {
 	e := newStaffEnv(t, true)
 	e.enroll("org@example.org", "organizer")
@@ -506,6 +578,12 @@ func TestStaffRoutesUnderDatabaseFailures(t *testing.T) {
 			return b.write("/api/v1/ops/tickets/"+ticketID+"/reissue", map[string]string{"reason": "x"}, "").status
 		},
 		func(b *browser) int { return b.do("GET", "/api/v1/ops/finance", nil, nil).status },
+		func(b *browser) int {
+			n++
+			return b.write("/api/v1/ops/events/live/offline-sales", map[string]any{"quantity": 1, "name": "Rahim Uddin",
+				"email": "rahim@example.com", "phone": "+8801811000000", "age": 34, "method": "cash"},
+				fmt.Sprintf("offline-sale-%04d", n)).status
+		},
 		func(b *browser) int { return b.do("GET", "/api/v1/ops/events/live", nil, nil).status },
 		func(b *browser) int {
 			return b.write("/api/v1/ops/events/live/capacity", map[string]int{"capacity": 120}, "").status

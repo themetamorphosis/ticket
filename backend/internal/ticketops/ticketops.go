@@ -128,18 +128,27 @@ func RequestRefund(ctx context.Context, db dbx.DB, staffID, orderID, reason stri
 		}
 		b := make([]byte, 10)
 		_, _ = rand.Read(b)
-		tag, err := tx.Exec(ctx, `INSERT INTO refund (refund_ref, attempt_id, amount_minor, currency, reason)
-			SELECT $2, a.id, a.captured_minor, a.currency, 'organizer' FROM payment_attempt a
+		// Money taken offline is handed back by the desk: that refund is
+		// settled as it is recorded, and the tickets are void at once.
+		var settled bool
+		err = tx.QueryRow(ctx, `INSERT INTO refund (refund_ref, attempt_id, amount_minor, currency, reason,
+				status, provider_refund_id)
+			SELECT $2, a.id, a.captured_minor, a.currency, 'organizer',
+				CASE WHEN a.provider = 'offline' THEN 'completed' ELSE 'requested' END,
+				CASE WHEN a.provider = 'offline' THEN 'manual' END
+			FROM payment_attempt a
 			WHERE a.order_id::text = $1 AND a.status = 'succeeded'
 				AND NOT EXISTS (SELECT 1 FROM refund r WHERE r.attempt_id = a.id)
-			ORDER BY a.created_at LIMIT 1`, orderID, "RF-"+hex.EncodeToString(b))
+			ORDER BY a.created_at LIMIT 1
+			RETURNING status = 'completed'`, orderID, "RF-"+hex.EncodeToString(b)).Scan(&settled)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNoPayment
+		}
 		if err != nil {
 			return err
 		}
-		if tag.RowsAffected() == 0 {
-			return ErrNoPayment
-		}
-		if _, err := tx.Exec(ctx, `UPDATE ticket SET status = 'refund_pending' WHERE order_id::text = $1`, orderID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE ticket SET status = CASE WHEN $2 THEN 'void' ELSE 'refund_pending' END
+			WHERE order_id::text = $1`, orderID, settled); err != nil {
 			return err
 		}
 		// From approval on, the money is accounted to the refund, not to sales.

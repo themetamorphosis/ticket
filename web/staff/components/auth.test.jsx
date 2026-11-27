@@ -24,7 +24,7 @@ describe('StaffShell', () => {
     expect(screen.getByText('Loading…')).toBeInTheDocument();
     expect(await screen.findByText('Hello Staff One')).toBeInTheDocument();
     const links = screen.getAllByRole('link').map((a) => a.textContent);
-    expect(links).toEqual(['Overview', 'Orders']);
+    expect(links).toEqual(['Overview', 'Orders', 'Sell offline']);
   });
 
   it('refuses a page outside the role', async () => {

@@ -73,6 +73,11 @@ type Ledger struct {
 	RefundedMinor     int64 `db:"refunded" json:"refunded_minor"`
 	RefundOpenMinor   int64 `db:"refund_open" json:"refund_open_minor"`
 	RefundFailedMinor int64 `db:"refund_failed" json:"refund_failed_minor"`
+	// Money staff took offline, by method. It is part of CapturedMinor but
+	// appears in no provider settlement report: finance counts it at the desk.
+	OfflineCashMinor  int64 `db:"offline_cash" json:"offline_cash_minor"`
+	OfflineBankMinor  int64 `db:"offline_bank" json:"offline_bank_minor"`
+	OfflineBkashMinor int64 `db:"offline_bkash" json:"offline_bkash_minor"`
 }
 
 // Balanced reports whether every captured taka is accounted for: sold
@@ -89,7 +94,13 @@ func GetLedger(ctx context.Context, db dbx.DB) (Ledger, error) {
 		(SELECT coalesce(sum(captured_minor), 0) FROM payment_attempt WHERE status = 'review')::bigint AS review,
 		(SELECT coalesce(sum(amount_minor), 0) FROM refund WHERE status = 'completed')::bigint AS refunded,
 		(SELECT coalesce(sum(amount_minor), 0) FROM refund WHERE status IN ('requested', 'pending'))::bigint AS refund_open,
-		(SELECT coalesce(sum(amount_minor), 0) FROM refund WHERE status = 'failed')::bigint AS refund_failed`)
+		(SELECT coalesce(sum(amount_minor), 0) FROM refund WHERE status = 'failed')::bigint AS refund_failed,
+		(SELECT coalesce(sum(captured_minor), 0) FROM payment_attempt
+			WHERE provider = 'offline' AND offline_method = 'cash' AND status = 'succeeded')::bigint AS offline_cash,
+		(SELECT coalesce(sum(captured_minor), 0) FROM payment_attempt
+			WHERE provider = 'offline' AND offline_method = 'bank' AND status = 'succeeded')::bigint AS offline_bank,
+		(SELECT coalesce(sum(captured_minor), 0) FROM payment_attempt
+			WHERE provider = 'offline' AND offline_method = 'bkash' AND status = 'succeeded')::bigint AS offline_bkash`)
 }
 
 // Entry is one buyer-visible step in an order's history.

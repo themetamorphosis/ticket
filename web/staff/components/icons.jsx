@@ -11,6 +11,7 @@ import {
   Menu01Icon,
   QrCode01Icon,
   Search01Icon,
+  Ticket01Icon,
   UserGroupIcon,
   Wallet01Icon,
   WifiDisconnected01Icon,
@@ -38,6 +39,7 @@ export const Logout = named(Logout01Icon);
 export const Menu = named(Menu01Icon);
 export const QrCodeScanner = named(QrCode01Icon);
 export const ReceiptLong = named(Invoice01Icon);
+export const ConfirmationNumber = named(Ticket01Icon);
 export const Search = named(Search01Icon);
 export const Warning = named(Alert02Icon);
 export const WifiOff = named(WifiDisconnected01Icon);

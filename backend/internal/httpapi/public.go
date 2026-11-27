@@ -202,6 +202,14 @@ func (p *public) createOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *public) orderError(w http.ResponseWriter, r *http.Request, err error) {
+	if !writeOrderError(w, err) {
+		p.internal(w, r, err)
+	}
+}
+
+// writeOrderError answers a booking error (shared by buyer bookings and staff
+// offline sales) and reports whether err was one.
+func writeOrderError(w http.ResponseWriter, err error) bool {
 	var (
 		fields    orders.FieldErrors
 		notOnSale *orders.NotOnSaleError
@@ -235,8 +243,9 @@ func (p *public) orderError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, orders.ErrNotHeld):
 		writeError(w, http.StatusConflict, "not_held", "This order is no longer on hold.")
 	default:
-		p.internal(w, r, err)
+		return false
 	}
+	return true
 }
 
 func (p *public) getOrder(w http.ResponseWriter, r *http.Request) {

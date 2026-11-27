@@ -16,6 +16,7 @@ import (
 	"kacheem/backend/internal/dbx"
 	"kacheem/backend/internal/fulfil"
 	"kacheem/backend/internal/ops"
+	"kacheem/backend/internal/orders"
 	"kacheem/backend/internal/payments"
 	"kacheem/backend/internal/publish"
 	"kacheem/backend/internal/session"
@@ -66,6 +67,7 @@ func NewStaff(d StaffDeps) http.Handler {
 	get(mux, "/api/v1/ops/events/{slug}/summary", s.as(orgFinSup, s.summary))
 	get(mux, "/api/v1/ops/orders", s.as(orgFinSup, s.searchOrders))
 	get(mux, "/api/v1/ops/orders/{ref}", s.as(orgFinSup, s.orderDetail))
+	post(mux, "/api/v1/ops/events/{slug}/offline-sales", s.protect(s.as(orgFinSup, s.sellOffline)))
 	post(mux, "/api/v1/ops/orders/{ref}/resend", s.protect(s.as(orgSup, s.resend)))
 	post(mux, "/api/v1/ops/orders/{ref}/refund", s.protect(s.as(orgFin, s.refund)))
 	post(mux, "/api/v1/ops/tickets/{id}/reissue", s.protect(s.as(orgSup, s.reissue)))
@@ -193,10 +195,16 @@ func (s *staffAPI) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *staffAPI) me(w http.ResponseWriter, r *http.Request, st staffauth.Staff) {
+	// The price is what the desk collects for an offline sale (no online fee).
 	events, err := dbx.All[struct {
-		Slug  string `db:"slug" json:"slug"`
-		Title string `db:"title" json:"title"`
-	}](r.Context(), s.DB, `SELECT slug, title FROM event ORDER BY starts_at`)
+		Slug       string `db:"slug" json:"slug"`
+		Title      string `db:"title" json:"title"`
+		Currency   string `db:"currency" json:"currency"`
+		PriceMinor int64  `db:"price_minor" json:"price_minor"`
+	}](r.Context(), s.DB, `
+		SELECT e.slug, e.title, e.currency,
+			coalesce((SELECT min(t.price_minor) FROM ticket_type t WHERE t.event_id = e.id), 0)::bigint AS price_minor
+		FROM event e ORDER BY e.starts_at`)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -361,6 +369,43 @@ func (s *staffAPI) opError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		s.internal(w, r, err)
 	}
+}
+
+type offlineSaleBody struct {
+	orders.Input
+	Method    string `json:"method"`
+	Reference string `json:"reference"`
+}
+
+// sellOffline records a sale paid at the desk; its tickets are issued and
+// delivered like an online order's. Retries carry the same Idempotency-Key.
+func (s *staffAPI) sellOffline(w http.ResponseWriter, r *http.Request, st staffauth.Staff) {
+	key := r.Header.Get("Idempotency-Key")
+	if !idempotencyKey.MatchString(key) {
+		writeError(w, http.StatusBadRequest, "bad_idempotency_key", "Missing or malformed Idempotency-Key header.")
+		return
+	}
+	var body offlineSaleBody
+	if !decode(w, r, &body) {
+		return
+	}
+	o, created, err := orders.SellOffline(r.Context(), s.DB, orders.OfflineSale{
+		EventSlug: r.PathValue("slug"), StaffID: st.ID, IdempotencyKey: key,
+		Input: body.Input, Method: body.Method, Reference: body.Reference,
+	}, s.Issuer.IssueInTx)
+	if err != nil {
+		if !writeOrderError(w, err) {
+			s.internal(w, r, err)
+		}
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	out := orderJSON(o)
+	out["channel"] = o.Channel
+	writeJSON(w, status, out)
 }
 
 type reasonBody struct {

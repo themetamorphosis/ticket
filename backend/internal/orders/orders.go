@@ -71,9 +71,11 @@ type Order struct {
 	Email          string    `db:"email"`
 	Phone          string    `db:"phone"`
 	Age            int       `db:"age"`
-	CreatedAt      time.Time `db:"created_at"`
-	ExpiresAt      time.Time `db:"expires_at"`
-	ServerTime     time.Time `db:"server_time"`
+	// Channel is "online" or "offline" (recorded by staff).
+	Channel    string    `db:"channel"`
+	CreatedAt  time.Time `db:"created_at"`
+	ExpiresAt  time.Time `db:"expires_at"`
+	ServerTime time.Time `db:"server_time"`
 }
 
 const orderView = `
@@ -81,7 +83,7 @@ const orderView = `
 		CASE WHEN o.status = 'held' AND o.expires_at <= now() THEN 'expired' ELSE o.status END AS status,
 		e.slug AS event_slug, e.title AS event_title, e.starts_at AS event_starts_at, e.time_zone AS event_time_zone,
 		l.quantity, l.unit_price_minor, l.unit_fee_minor, o.total_minor, o.currency,
-		o.purchaser_name, o.email, o.phone, o.age, o.created_at, o.expires_at, now() AS server_time
+		o.purchaser_name, o.email, o.phone, o.age, o.channel, o.created_at, o.expires_at, now() AS server_time
 	FROM ticket_order o
 	JOIN event e ON e.id = o.event_id
 	JOIN order_line l ON l.order_id = o.id`

@@ -56,6 +56,7 @@ func GetSummary(ctx context.Context, db dbx.DB, slug string) (Summary, error) {
 type OrderRow struct {
 	Ref        string    `db:"public_ref" json:"public_ref"`
 	Status     string    `db:"status" json:"status"`
+	Channel    string    `db:"channel" json:"channel"`
 	Name       string    `db:"purchaser_name" json:"purchaser_name"`
 	Email      string    `db:"email" json:"email"`
 	Phone      string    `db:"phone" json:"phone"`
@@ -83,7 +84,7 @@ func Mask(s string) string {
 func Search(ctx context.Context, db dbx.DB, query string, unmasked bool) ([]OrderRow, error) {
 	q := strings.TrimSpace(query)
 	rows, err := dbx.All[OrderRow](ctx, db, `
-		SELECT o.public_ref, o.status, o.purchaser_name, o.email, o.phone, l.quantity, o.total_minor, o.currency, o.created_at
+		SELECT o.public_ref, o.status, o.channel, o.purchaser_name, o.email, o.phone, l.quantity, o.total_minor, o.currency, o.created_at
 		FROM ticket_order o JOIN order_line l ON l.order_id = o.id
 		WHERE o.public_ref = upper($1) OR lower(o.email) = lower($1)
 			OR o.phone = replace(replace($1, ' ', ''), '-', '')
@@ -117,6 +118,11 @@ type AttemptRow struct {
 	Amount    int64     `db:"amount_minor" json:"amount_minor"`
 	TrxID     *string   `db:"provider_trx_id" json:"provider_trx_id"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	// Set for offline payments: cash, bank or bkash, the proof typed in, and
+	// the staff member who took the money.
+	OfflineMethod    *string `db:"offline_method" json:"offline_method"`
+	OfflineReference *string `db:"offline_reference" json:"offline_reference"`
+	ReceivedBy       *string `db:"received_by" json:"received_by"`
 }
 
 // RefundRow is a refund.
@@ -158,8 +164,11 @@ func GetDetail(ctx context.Context, db dbx.DB, ref string, unmasked bool) (Detai
 		WHERE t.order_id = $1 ORDER BY t.ordinal`, d.ID); err != nil {
 		return Detail{}, err
 	}
-	if d.Attempts, err = dbx.All[AttemptRow](ctx, db, `SELECT provider, status, amount_minor, provider_trx_id, created_at
-		FROM payment_attempt WHERE order_id = $1 ORDER BY created_at`, d.ID); err != nil {
+	if d.Attempts, err = dbx.All[AttemptRow](ctx, db, `
+		SELECT a.provider, a.status, a.amount_minor, a.provider_trx_id, a.created_at,
+			a.offline_method, a.offline_reference, s.name AS received_by
+		FROM payment_attempt a LEFT JOIN staff s ON s.id = a.received_by
+		WHERE a.order_id = $1 ORDER BY a.created_at`, d.ID); err != nil {
 		return Detail{}, err
 	}
 	if d.Refunds, err = dbx.All[RefundRow](ctx, db, `SELECT r.reason, r.status, r.amount_minor, r.last_error

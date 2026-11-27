@@ -84,7 +84,11 @@ const detail = {
     { id: 't2', ordinal: 2, status: 'valid', credential_version: 2, gate: null, admitted_at: null },
   ],
   attempts: [{ provider: 'bkash', status: 'succeeded', amount_minor: 310000, provider_trx_id: 'TRX1', created_at: '2027-01-10T04:01:00Z' },
-    { provider: 'bkash', status: 'failed', amount_minor: 310000, provider_trx_id: null, created_at: '2027-01-10T04:00:30Z' }],
+    { provider: 'bkash', status: 'failed', amount_minor: 310000, provider_trx_id: null, created_at: '2027-01-10T04:00:30Z' },
+    { provider: 'offline', status: 'succeeded', amount_minor: 300000, provider_trx_id: 'OF-1', created_at: '2027-01-10T05:00:00Z',
+      offline_method: 'bkash', offline_reference: '8AB12', received_by: 'Desk One' },
+    { provider: 'offline', status: 'succeeded', amount_minor: 150000, provider_trx_id: 'OF-2', created_at: '2027-01-10T06:00:00Z',
+      offline_method: 'cash', offline_reference: null, received_by: 'Desk One' }],
   refunds: [{ reason: 'organizer', status: 'failed', amount_minor: 310000, last_error: 'no balance' },
     { reason: 'late_payment', status: 'completed', amount_minor: 1, last_error: null }],
   history: [{ at: '2027-01-11T00:00:00Z', actor: 'Support', action: 'ticket.reissue', object_id: 't2', reason: 'lost phone' },
@@ -106,6 +110,10 @@ describe('Orders', () => {
     expect(screen.getByText(/North, /)).toBeInTheDocument();
     expect(screen.getByText('2 (reissued ×1)')).toBeInTheDocument();
     expect(screen.getByText(/no transaction/)).toBeInTheDocument();
+    expect(screen.getByText(/Offline, bKash · succeeded/)).toBeInTheDocument();
+    expect(screen.getByText(/Received by Desk One · 8AB12 · receipt OF-1/)).toBeInTheDocument();
+    expect(screen.getByText(/Offline, cash · succeeded/)).toBeInTheDocument();
+    expect(screen.getByText(/Received by Desk One · no reference/)).toBeInTheDocument();
     expect(screen.getByText(/no balance/)).toBeInTheDocument();
     expect(screen.getByText(/“lost phone”/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Refund order' })).not.toBeInTheDocument();

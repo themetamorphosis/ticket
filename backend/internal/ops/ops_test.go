@@ -129,6 +129,36 @@ func TestSummarySearchAndDetail(t *testing.T) {
 	}
 }
 
+func TestOfflineSaleShowsHowItWasPaid(t *testing.T) {
+	e := setup(t)
+	_, onlineRef := e.paid("Nusrat Jahan", "nusrat@example.com")
+	o, _, err := orders.SellOffline(ctx, e.pool, orders.OfflineSale{EventSlug: "live", StaffID: e.staff,
+		IdempotencyKey: "offline-0001", Method: "bank", Reference: "DBBL-778",
+		Input: orders.Input{Quantity: 3, Name: "Rahim Uddin", Email: "rahim@example.com", Phone: "+8801811000000", Age: 40}},
+		e.iss.IssueInTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := GetDetail(ctx, e.pool, o.Ref, true)
+	if err != nil || d.Order.Channel != "offline" || d.Order.TotalMinor != 450000 || len(d.Tickets) != 3 || len(d.Attempts) != 1 ||
+		*d.Attempts[0].OfflineMethod != "bank" || *d.Attempts[0].OfflineReference != "DBBL-778" ||
+		*d.Attempts[0].ReceivedBy != "Gate Person" || len(d.History) != 1 || d.History[0].Action != "order.offline_sale" {
+		t.Fatalf("detail %+v %v", d, err)
+	}
+	online, _ := GetDetail(ctx, e.pool, onlineRef, true)
+	if online.Order.Channel != "online" || online.Attempts[0].OfflineMethod != nil || online.Attempts[0].ReceivedBy != nil {
+		t.Fatalf("online detail %+v", online)
+	}
+	if s, _ := GetSummary(ctx, e.pool, "live"); s.Sold != 5 || s.PaidOrders != 2 || s.RevenueMinor != 310000+450000 {
+		t.Fatalf("summary %+v", s)
+	}
+	l, _ := payments.GetLedger(ctx, e.pool)
+	if !l.Balanced() || l.OfflineBankMinor != 450000 || l.OfflineCashMinor != 0 || l.OfflineBkashMinor != 0 ||
+		l.CapturedMinor != 310000+450000 {
+		t.Fatalf("ledger %+v", l)
+	}
+}
+
 func TestFinanceQueue(t *testing.T) {
 	e := setup(t)
 	orderID, ref := e.paid("A", "a@example.com")

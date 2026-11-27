@@ -29,6 +29,7 @@ describe('staff api', () => {
       [api.summary('live'), 'GET', '/api/v1/ops/events/live/summary'],
       [api.searchOrders('a b'), 'GET', '/api/v1/ops/orders?q=a%20b'],
       [api.order('R'), 'GET', '/api/v1/ops/orders/R'],
+      [api.sellOffline('live', { quantity: 1 }, 'offline-k1'), 'POST', '/api/v1/ops/events/live/offline-sales', '{"quantity":1}'],
       [api.resend('R'), 'POST', '/api/v1/ops/orders/R/resend'],
       [api.refund('R', 'why'), 'POST', '/api/v1/ops/orders/R/refund', '{"reason":"why"}'],
       [api.reissue('T', 'why'), 'POST', '/api/v1/ops/tickets/T/reissue', '{"reason":"why"}'],
@@ -55,6 +56,8 @@ describe('staff api', () => {
       if (method === 'POST') expect(call[1].headers['X-CSRF-Token']).toBe('tok');
     }
     expect(fetchMock.mock.calls.filter((c) => c[0] === '/api/v1/session')).toHaveLength(1);
+    const sale = fetchMock.mock.calls.find((c) => c[0] === '/api/v1/ops/events/live/offline-sales');
+    expect(sale[1].headers['Idempotency-Key']).toBe('offline-k1');
   });
 
   it('reports API, empty-body and network errors', async () => {

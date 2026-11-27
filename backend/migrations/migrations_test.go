@@ -229,4 +229,28 @@ func TestPaymentTablesGuardTheirInvariants(t *testing.T) {
 	mustFail("zero refund", `
 		INSERT INTO refund (refund_ref, attempt_id, amount_minor, currency, reason)
 		VALUES ('RF-2', $1, 0, 'BDT', 'late_payment')`, attemptID)
+
+	// Offline payment fields belong to offline payments only, and an offline
+	// payment always names its method and the staff member who took it.
+	var staffID string
+	if err := pool.QueryRow(ctx, `INSERT INTO staff (email, name, role) VALUES ('d@example.org', 'Desk', 'support')
+		RETURNING id`).Scan(&staffID); err != nil {
+		t.Fatal(err)
+	}
+	mustFail("gateway payment with offline method", `UPDATE payment_attempt SET offline_method = 'cash' WHERE id = $1`, attemptID)
+	mustFail("gateway payment with offline reference", `UPDATE payment_attempt SET offline_reference = 'R1' WHERE id = $1`, attemptID)
+	mustFail("gateway payment with receiver", `UPDATE payment_attempt SET received_by = $2 WHERE id = $1`, attemptID, staffID)
+	offline := func(method, by string) string {
+		return `INSERT INTO payment_attempt (merchant_ref, order_id, provider, amount_minor, currency, offline_method, received_by)
+			VALUES ('OF-0000001', '` + orderID + `', 'offline', 150000, 'BDT', ` + method + `, ` + by + `)`
+	}
+	mustFail("offline without method", offline("NULL", "'"+staffID+"'"))
+	mustFail("offline without receiver", offline("'cash'", "NULL"))
+	mustFail("unknown offline method", offline("'card'", "'"+staffID+"'"))
+	mustFail("empty offline reference", `UPDATE payment_attempt SET provider = 'offline', offline_method = 'cash',
+		received_by = $2, offline_reference = '' WHERE id = $1`, attemptID, staffID)
+	if _, err := pool.Exec(ctx, offline("'bkash'", "'"+staffID+"'")); err != nil {
+		t.Fatalf("valid offline payment: %v", err)
+	}
+	mustFail("unknown order channel", `UPDATE ticket_order SET channel = 'phone' WHERE id = $1`, orderID)
 }

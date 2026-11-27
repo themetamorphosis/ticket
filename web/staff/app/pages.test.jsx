@@ -9,6 +9,7 @@ import OrdersPage from './orders/page';
 import Home from './page';
 import PeoplePage from './people/page';
 import Scan from './scan/page';
+import SellPage from './sell/page';
 
 const m = { staff: { role: 'organizer' }, events: [] };
 
@@ -17,6 +18,7 @@ describe('routes', () => {
     [Home, ['organizer', 'finance', 'support', 'gate']],
     [Scan, ['organizer', 'gate']],
     [OrdersPage, ['organizer', 'finance', 'support']],
+    [SellPage, ['organizer', 'finance', 'support']],
     [FinancePage, ['organizer', 'finance']],
     [EventPage, ['organizer']],
     [PeoplePage, ['organizer']],
