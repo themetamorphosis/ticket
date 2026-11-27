@@ -31,8 +31,11 @@ NODE := $(DOCKER_RUN) -w /repo/web -e npm_config_cache=/repo/.cache/npm \
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
 
+# Every toolchain container joins the Compose network, so make sure Compose has
+# created it (without starting services) even on a fresh machine or CI runner.
 cache:
 	@mkdir -p .cache/home .cache/go .cache/go-build .cache/npm
+	@docker compose up --no-start --quiet-pull db redis >/dev/null 2>&1 || docker compose up --no-start db redis
 
 up: ## Start local PostgreSQL and Redis
 	docker compose up -d --wait db redis
