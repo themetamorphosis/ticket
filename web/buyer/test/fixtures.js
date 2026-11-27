@@ -47,6 +47,9 @@ export function order(overrides = {}) {
     created_at: new Date(now).toISOString(),
     expires_at: new Date(now + 10 * 60 * 1000).toISOString(),
     server_time: new Date(now).toISOString(),
+    payment_provider: 'fake',
+    payment_status: null,
+    timeline: [{ at: new Date(now).toISOString(), kind: 'order_created' }],
     ...overrides,
   };
 }

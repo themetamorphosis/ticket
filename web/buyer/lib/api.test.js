@@ -9,6 +9,7 @@ import {
   getQuote,
   loadEvent,
   resetSessionCache,
+  startCheckout,
 } from './api';
 
 function reply(status, body) {
@@ -81,5 +82,18 @@ describe('api', () => {
     const err = await getAvailability('live').catch((e) => e);
     expect(err).toMatchObject({ status: 0, code: 'network' });
     expect(new ApiError(0, 'x', 'y').details).toEqual({});
+  });
+});
+
+describe('startCheckout', () => {
+  it('posts with the CSRF token and returns the provider page', async () => {
+    resetSessionCache();
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => reply(200, { csrf_token: 'tok' }))
+      .mockImplementationOnce(() => reply(200, { redirect_url: 'https://pay.example/1' }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await startCheckout('AB12C DE34F')).toBe('https://pay.example/1');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/AB12C%20DE34F/checkout');
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'POST', headers: { 'X-CSRF-Token': 'tok' } });
   });
 });

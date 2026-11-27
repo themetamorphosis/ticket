@@ -1,7 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, cancelOrder, getOrder } from '../lib/api';
+import { ApiError, cancelOrder, getOrder, startCheckout } from '../lib/api';
 import { deferred, order } from '../test/fixtures';
 import { OrderView } from './OrderView';
 
@@ -9,13 +9,16 @@ vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal()),
   getOrder: vi.fn(),
   cancelOrder: vi.fn(),
+  startCheckout: vi.fn(),
 }));
 
 const ref = () => 'AB12C-DE34F';
+const at = '2027-02-14T04:00:00Z';
 
 beforeEach(() => {
   getOrder.mockReset();
   cancelOrder.mockReset();
+  startCheckout.mockReset();
 });
 afterEach(() => vi.useRealTimers());
 
@@ -28,14 +31,79 @@ describe('OrderView', () => {
     expect(getOrder).toHaveBeenCalledWith('FROMURL01');
   });
 
-  it('shows the held order with a server-clock countdown', async () => {
+  it('shows the held order with a server-clock countdown and its history', async () => {
     getOrder.mockResolvedValue(order());
     render(<OrderView getRef={ref} />);
     expect(screen.getByText('Loading your order…')).toBeInTheDocument();
-    expect(await screen.findByRole('status')).toHaveTextContent(/held for 10:00, until \d\d:\d\d/);
+    expect(await screen.findByRole('timer')).toHaveTextContent(/held for 10:00, until \d\d:\d\d.*Complete payment/);
     expect(screen.getByText(/Kacheem Live, Sunday,? 14 February 2027/)).toBeInTheDocument();
     expect(screen.getByText(/3 × .*1,550\.00/)).toBeInTheDocument();
     expect(screen.getByText('Nusrat Jahan, nusrat@example.com, +8801711000000')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Pay .*4,650\.00/ })).toBeEnabled();
+    expect(screen.getByText(/on the test gateway's secure page/)).toBeInTheDocument();
+    expect(screen.getByRole('list')).toHaveTextContent('Tickets held');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('sends the buyer to the payment page', async () => {
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    const pending = deferred();
+    startCheckout.mockReturnValue(pending.promise);
+    getOrder.mockResolvedValue(order());
+    render(<OrderView getRef={ref} navigate={navigate} />);
+    await user.click(await screen.findByRole('button', { name: /^Pay / }));
+    expect(screen.getByRole('button', { name: 'Opening payment…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Release these tickets' })).toBeDisabled();
+    await act(async () => pending.resolve('https://pay.example/session/1'));
+    expect(startCheckout).toHaveBeenCalledWith('AB12C-DE34F');
+    expect(navigate).toHaveBeenCalledWith('https://pay.example/session/1');
+  });
+
+  it('navigates with the browser by default', async () => {
+    const user = userEvent.setup();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    startCheckout.mockResolvedValue('http://localhost:3000/#paid');
+    getOrder.mockResolvedValue(order());
+    render(<OrderView getRef={ref} />);
+    await user.click(await screen.findByRole('button', { name: /^Pay / }));
+    expect(startCheckout).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it('explains a payment that could not start and allows another try', async () => {
+    const user = userEvent.setup();
+    startCheckout.mockRejectedValue(new ApiError(503, 'payment_unavailable', 'Payment is unavailable right now.'));
+    getOrder.mockResolvedValue(order({ payment_status: 'failed', payment_provider: 'bkash' }));
+    render(<OrderView getRef={ref} />);
+    expect(await screen.findByRole('status')).toHaveTextContent('no money was taken');
+    expect(screen.getByText(/on bKash's secure page/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Try paying again/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Payment is unavailable right now.');
+    expect(screen.getByRole('button', { name: /^Try paying again/ })).toBeEnabled();
+  });
+
+  it('polls while the payment is being confirmed, then shows the result', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    getOrder
+      .mockResolvedValueOnce(order({ payment_status: 'pending' }))
+      .mockRejectedValueOnce(new ApiError(0, 'network', 'offline'))
+      .mockResolvedValueOnce(order({ status: 'paid', payment_status: 'succeeded' }));
+    render(<OrderView getRef={ref} pollMs={100} />);
+    expect(await screen.findByText('Checking your payment…')).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTime(250));
+    expect(await screen.findByText(/Payment received/)).toBeInTheDocument();
+    expect(getOrder).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops polling and says so when confirmation takes long', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    getOrder.mockResolvedValue(order({ payment_status: 'pending', payment_provider: 'other' }));
+    render(<OrderView getRef={ref} pollMs={50} maxPolls={2} />);
+    await screen.findByText('Checking your payment…');
+    await act(async () => vi.advanceTimersByTime(200));
+    expect(await screen.findByText(/still confirming your payment with the payment provider/)).toBeInTheDocument();
+    expect(getOrder).toHaveBeenCalledTimes(3);
   });
 
   it('marks the hold expired when the countdown reaches zero', async () => {
@@ -45,7 +113,7 @@ describe('OrderView', () => {
       order({ server_time: new Date(now).toISOString(), expires_at: new Date(now + 2000).toISOString() }),
     );
     render(<OrderView getRef={ref} />);
-    expect(await screen.findByRole('status')).toHaveTextContent(/held for 0:0[12]/);
+    expect(await screen.findByRole('timer')).toHaveTextContent(/held for 0:0[12]/);
     await act(async () => vi.advanceTimersByTime(3000));
     expect(screen.getByRole('status')).toHaveTextContent('This hold has expired');
     expect(screen.queryByRole('button', { name: /Release/ })).not.toBeInTheDocument();
@@ -59,8 +127,11 @@ describe('OrderView', () => {
     render(<OrderView getRef={ref} />);
     await user.click(await screen.findByRole('button', { name: 'Release these tickets' }));
     expect(screen.getByRole('button', { name: 'Releasing…' })).toBeDisabled();
-    await act(async () => pending.resolve(order({ status: 'cancelled' })));
+    await act(async () =>
+      pending.resolve(order({ status: 'cancelled', timeline: [{ at, kind: 'order_cancelled' }, { at, kind: 'something_new' }] })),
+    );
     expect(screen.getByRole('status')).toHaveTextContent('You released these tickets.');
+    expect(screen.getByRole('list')).toHaveTextContent(/Tickets released.*something_new/);
     expect(cancelOrder).toHaveBeenCalledWith('AB12C-DE34F');
   });
 
@@ -75,12 +146,19 @@ describe('OrderView', () => {
   });
 
   it.each([
-    ['expired', 'This hold has expired'],
-    ['paid', 'Payment received.'],
-  ])('describes a %s order', async (status, text) => {
-    getOrder.mockResolvedValue(order({ status }));
+    [{ status: 'expired' }, 'This hold has expired'],
+    [{ status: 'paid', payment_status: 'succeeded' }, 'Payment received.'],
+    [{ status: 'held', payment_status: 'review' }, 'Our support team will contact you'],
+    [{ status: 'expired', timeline: [{ at, kind: 'refund_requested' }] }, 'will be refunded in full'],
+    [
+      { status: 'expired', timeline: [{ at, kind: 'refund_requested' }, { at, kind: 'refund_completed' }] },
+      'has been refunded in full',
+    ],
+  ])('describes the order %#', async (overrides, text) => {
+    getOrder.mockResolvedValue(order(overrides));
     render(<OrderView getRef={ref} />);
-    expect(await screen.findByRole('status')).toHaveTextContent(text);
+    await screen.findByRole('heading', { name: /Your order/ });
+    expect(screen.getByText(new RegExp(text))).toBeInTheDocument();
   });
 
   it.each([

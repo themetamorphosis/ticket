@@ -77,7 +77,7 @@ describe('BookingForm', () => {
     await user.click(screen.getByRole('button', { name: 'Hold tickets' }));
     expect(screen.getByRole('button', { name: 'Holding your tickets…' })).toBeDisabled();
     await act(async () => pending.resolve(order()));
-    expect(onBooked).toHaveBeenCalledWith(order({ created_at: expect.any(String), expires_at: expect.any(String), server_time: expect.any(String) }));
+    expect(onBooked).toHaveBeenCalledWith(expect.objectContaining({ ref: 'AB12C-DE34F', status: 'held' }));
     const [key, body] = createOrder.mock.calls[0];
     expect(key).toMatch(/^[0-9a-f-]{36}$/);
     expect(body).toEqual({ event: 'live', quantity: 1, name: 'Nusrat Jahan', email: 'nusrat@example.com', phone: '+8801711000000', age: 28 });

@@ -76,6 +76,13 @@ export function getOrder(ref) {
   return request(`/api/v1/orders/${enc(ref)}`);
 }
 
+// Opens (or resumes) the payment session and returns the provider page URL.
+export async function startCheckout(ref) {
+  const token = await csrfToken();
+  const res = await request(`/api/v1/orders/${enc(ref)}/checkout`, { method: 'POST', headers: { 'X-CSRF-Token': token } });
+  return res.redirect_url;
+}
+
 export async function cancelOrder(ref) {
   const token = await csrfToken();
   return request(`/api/v1/orders/${enc(ref)}/cancel`, { method: 'POST', headers: { 'X-CSRF-Token': token } });

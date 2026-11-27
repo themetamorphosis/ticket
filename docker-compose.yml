@@ -68,6 +68,14 @@ services:
       API_PUBLIC_LISTEN: tcp:0.0.0.0:8080
       API_STAFF_LISTEN: tcp:0.0.0.0:8081
       PUBLIC_ORIGIN: http://localhost:${WEB_HOST_PORT:-8088}
+      # The local fake gateway; no real money. For the bKash sandbox set
+      # PAYMENT_PROVIDER=bkash and BKASH_* in a gitignored .env file.
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-fake}
+      BKASH_BASE_URL: ${BKASH_BASE_URL:-}
+      BKASH_USERNAME: ${BKASH_USERNAME:-}
+      BKASH_PASSWORD: ${BKASH_PASSWORD:-}
+      BKASH_APP_KEY: ${BKASH_APP_KEY:-}
+      BKASH_APP_SECRET: ${BKASH_APP_SECRET:-}
     volumes: [".:/repo"]
     depends_on:
       db: { condition: service_healthy }
