@@ -80,8 +80,25 @@ func TestLoadWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWorker: %v", err)
 	}
-	if cfg.DatabaseURL != "postgres://db/tickets" {
-		t.Fatalf("DatabaseURL = %q", cfg.DatabaseURL)
+	if cfg.DatabaseURL != "postgres://db/tickets" || cfg.ExpiryInterval != DefaultExpiryInterval {
+		t.Fatalf("cfg = %+v", cfg)
+	}
+	cfg, err = LoadWorker(env(map[string]string{"DATABASE_URL": "x", "EXPIRY_INTERVAL": "250ms"}))
+	if err != nil || cfg.ExpiryInterval != 250*time.Millisecond {
+		t.Fatalf("cfg = %+v err %v", cfg, err)
+	}
+	if _, err := LoadWorker(env(map[string]string{"DATABASE_URL": "x", "EXPIRY_INTERVAL": "often"})); err == nil {
+		t.Fatal("bad EXPIRY_INTERVAL accepted")
+	}
+}
+
+func TestLoadPublish(t *testing.T) {
+	cfg, err := LoadPublish(env(map[string]string{"DATABASE_URL": "x", "PUBLISH_DIR": "/srv/buyer"}))
+	if err != nil || cfg != (Publish{DatabaseURL: "x", Dir: "/srv/buyer"}) {
+		t.Fatalf("cfg = %+v err %v", cfg, err)
+	}
+	if _, err := LoadPublish(env(nil)); err == nil || !strings.Contains(err.Error(), "PUBLISH_DIR") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

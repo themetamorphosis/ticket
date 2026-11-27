@@ -24,9 +24,20 @@ type API struct {
 	ShutdownTimeout time.Duration
 }
 
+// DefaultExpiryInterval is how often the worker releases expired holds.
+const DefaultExpiryInterval = 5 * time.Second
+
 // Worker is the configuration of cmd/worker and cmd/migrate.
 type Worker struct {
+	DatabaseURL    string
+	ExpiryInterval time.Duration
+}
+
+// Publish is the configuration of cmd/publish.
+type Publish struct {
 	DatabaseURL string
+	// Dir is the web root directory that receives event.json.
+	Dir string
 }
 
 // LoadAPI reads the API configuration, reporting every problem at once.
@@ -40,21 +51,41 @@ func LoadAPI(getenv func(string) string) (API, error) {
 		PublicOrigin:    required(getenv, "PUBLIC_ORIGIN", &errs),
 		ShutdownTimeout: DefaultShutdownTimeout,
 	}
-	if v := getenv("SHUTDOWN_TIMEOUT"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil || d <= 0 {
-			errs = append(errs, fmt.Errorf("SHUTDOWN_TIMEOUT must be a positive duration, got %q", v))
-		}
-		cfg.ShutdownTimeout = d
-	}
+	cfg.ShutdownTimeout = duration(getenv, "SHUTDOWN_TIMEOUT", DefaultShutdownTimeout, &errs)
 	return cfg, errors.Join(errs...)
 }
 
 // LoadWorker reads the worker and migration configuration.
 func LoadWorker(getenv func(string) string) (Worker, error) {
 	var errs []error
-	cfg := Worker{DatabaseURL: required(getenv, "DATABASE_URL", &errs)}
+	cfg := Worker{
+		DatabaseURL:    required(getenv, "DATABASE_URL", &errs),
+		ExpiryInterval: duration(getenv, "EXPIRY_INTERVAL", DefaultExpiryInterval, &errs),
+	}
 	return cfg, errors.Join(errs...)
+}
+
+// LoadPublish reads the publish job configuration.
+func LoadPublish(getenv func(string) string) (Publish, error) {
+	var errs []error
+	cfg := Publish{
+		DatabaseURL: required(getenv, "DATABASE_URL", &errs),
+		Dir:         required(getenv, "PUBLISH_DIR", &errs),
+	}
+	return cfg, errors.Join(errs...)
+}
+
+// duration reads an optional positive duration.
+func duration(getenv func(string) string, name string, def time.Duration, errs *[]error) time.Duration {
+	v := getenv(name)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		*errs = append(*errs, fmt.Errorf("%s must be a positive duration, got %q", name, v))
+	}
+	return d
 }
 
 func required(getenv func(string) string, name string, errs *[]error) string {
