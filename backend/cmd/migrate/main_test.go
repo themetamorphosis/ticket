@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
 	"testing"
@@ -21,13 +22,18 @@ const unreachable = "postgres://app:x@127.0.0.1:1/x?connect_timeout=1"
 func TestUpStatusDown(t *testing.T) {
 	ctx := context.Background()
 	env := getter(map[string]string{"DATABASE_URL": pgtest.NewDatabase(t)})
+	files, err := fs.Glob(migrations.Files, "*.sql")
+	if err != nil || len(files) < 2 {
+		t.Fatalf("migrations %v %v", files, err)
+	}
+	first, last := files[0], files[len(files)-1]
 	steps := []struct{ cmd, want string }{
-		{"status", "pending  00001_audit_event.sql"},
-		{"up", "OK    up 00003_payments.sql"},
-		{"status", "applied  00003_payments.sql"},
-		{"down", "OK    down 00003_payments.sql"},
-		{"down", "OK    down 00002_reservations.sql"},
-		{"down", "OK    down 00001_audit_event.sql"},
+		{"status", "pending  " + first},
+		{"up", "OK    up " + last},
+		{"status", "applied  " + last},
+	}
+	for i := len(files) - 1; i >= 0; i-- {
+		steps = append(steps, struct{ cmd, want string }{"down", "OK    down " + files[i]})
 	}
 	for _, s := range steps {
 		var out bytes.Buffer
