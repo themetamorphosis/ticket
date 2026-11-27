@@ -35,10 +35,16 @@ NGINX with production-style routing. `make app-down` stops the stack.
 
 Payments run through the local **fake gateway** by default
 (`PAYMENT_PROVIDER=fake`): **Pay** opens a development page where you approve,
-decline or cancel. No real money is involved. To use the bKash sandbox instead, put
-`PAYMENT_PROVIDER=bkash` and the `BKASH_*` values from `.env.example` in your
-gitignored `.env`, then run `make app-up` again. Credentials never go in the
-repository.
+decline or cancel. No real money is involved. To use a provider's sandbox instead, put
+`PAYMENT_PROVIDER=bkash` (with the `BKASH_*` values) or
+`PAYMENT_PROVIDER=paystation` (with the `PAYSTATION_*` values) from
+`.env.example` in your gitignored `.env`, then run `make app-up` again.
+Credentials never go in the repository.
+
+| Provider | Money moves | Refunds | Notifications |
+| --- | --- | --- | --- |
+| bKash | Only when we call Execute, so an expired hold is never charged | Refund API, checked before retrying | Not used; Execute and Query decide |
+| PayStation | Inside PayStation's page, so a late payment is recorded and refunded | No API: finance refunds in the merchant panel, and the refund completes here once PayStation reports it | `POST /payments/notify/paystation` (IPN URL to give PayStation), verified with Transaction Status |
 
 If ports 5432 or 6379 are already taken on your machine, copy `.env.example` to
 `.env` and change `DB_HOST_PORT` and `REDIS_HOST_PORT`. The tests talk to the

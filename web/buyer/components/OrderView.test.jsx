@@ -83,6 +83,12 @@ describe('OrderView', () => {
     expect(screen.getByRole('button', { name: /^Try paying again/ })).toBeEnabled();
   });
 
+  it('names PayStation as the payment page', async () => {
+    getOrder.mockResolvedValue(order({ payment_provider: 'paystation' }));
+    render(<OrderView getRef={ref} />);
+    expect(await screen.findByText(/on PayStation's secure page/)).toBeInTheDocument();
+  });
+
   it('polls while the payment is being confirmed, then shows the result', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     getOrder

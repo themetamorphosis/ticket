@@ -13,7 +13,7 @@ function goTo(url) {
   window.location.assign(url);
 }
 
-const PROVIDERS = { bkash: 'bKash', fake: 'the test gateway' };
+const PROVIDERS = { bkash: 'bKash', paystation: 'PayStation', fake: 'the test gateway' };
 
 const HISTORY = {
   order_created: 'Tickets held',

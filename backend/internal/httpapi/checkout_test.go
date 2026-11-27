@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +15,8 @@ import (
 	"github.com/alexedwards/scs/v2"
 
 	"kacheem/backend/internal/dbx"
+	"kacheem/backend/internal/payments"
+	"kacheem/backend/internal/payments/fakegw"
 	"kacheem/backend/internal/pgtest"
 	"kacheem/backend/internal/session"
 )
@@ -152,4 +155,71 @@ func TestCheckoutAndPaidOrderUnderDatabaseFailures(t *testing.T) {
 		}
 		return nil
 	}, func(int, error) {})
+}
+
+// notifyingFake adds PayStation-style notifications to the fake gateway.
+type notifyingFake struct{ *fakegw.Gateway }
+
+func (notifyingFake) ParseNotification(body []byte) (string, error) {
+	var n struct {
+		Invoice string `json:"invoice_number"`
+	}
+	if err := json.Unmarshal(body, &n); err != nil || n.Invoice == "" {
+		return "", errors.New("bad notification")
+	}
+	return n.Invoice, nil
+}
+
+func TestPaymentNotifications(t *testing.T) {
+	pool := pgtest.Pool(t)
+	pgtest.CreateEvent(t, pool, pgtest.Event{Slug: "live"})
+	srv, logs, gw := newPaymentServer(t, pool, pool)
+	b := newBrowser(t, srv)
+
+	notify := func(provider, body string) response {
+		return b.do("POST", "/payments/notify/"+provider, body, map[string]string{"Content-Type": "application/json"})
+	}
+	// The fake gateway sends no notifications.
+	if r := notify("fake", `{"invoice_number":"x"}`); r.status != 404 || r.errCode() != "unknown_payment" {
+		t.Fatalf("unsupported: %d %v", r.status, r.body)
+	}
+	if r := notify("paystation", `{}`); r.status != 404 || r.errCode() != "not_found" {
+		t.Fatalf("other provider: %d %v", r.status, r.body)
+	}
+	if r := notify("fake", strings.Repeat("x", MaxBodyBytes+1)); r.status != 413 {
+		t.Fatalf("oversize: %d %v", r.status, r.body)
+	}
+
+	// Swap in a notifying gateway on the same server.
+	svc := &payments.Service{DB: pool, Gateway: notifyingFake{gw}, ReturnURL: srv.URL + "/payments/return/fake"}
+	h := NewPublic(PublicDeps{DB: pool, Sessions: session.NewBuyer(pool, 0, nil), Origin: testOrigin,
+		Logger: slog.New(slog.NewJSONHandler(logs, nil)), Payments: svc, FakeGatewayPage: gw})
+	srv2 := httptest.NewTLSServer(h)
+	defer srv2.Close()
+	gw.BaseURL = srv2.URL
+	b2 := newBrowser(t, srv2)
+	b2.startSession()
+	ref := b2.write("/api/v1/orders", booking(1), "key-00000001").body["ref"].(string)
+	redirect := b2.write("/api/v1/orders/"+ref+"/checkout", nil, "").body["redirect_url"].(string)
+	pref := redirect[strings.LastIndex(redirect, "/")+1:]
+	_, _ = gw.Decide(t.Context(), pref, "approve")
+	_, _ = gw.Complete(t.Context(), pref)
+
+	body := `{"invoice_number":"` + pref + `","trx_status":"Success","trx_amount":1550}`
+	gw.FailNext("query", errors.New("timeout"))
+	if r := b2.do("POST", "/payments/notify/fake", body, nil); r.status != 503 || r.errCode() != "retry" {
+		t.Fatalf("retry: %d %v", r.status, r.body)
+	}
+	if r := b2.do("POST", "/payments/notify/fake", body, nil); r.status != 200 || r.body["status"] != "success" {
+		t.Fatalf("notify: %d %v", r.status, r.body)
+	}
+	if r := b2.do("GET", "/api/v1/orders/"+ref, nil, nil); r.body["status"] != "paid" {
+		t.Fatalf("order %v", r.body)
+	}
+	if r := b2.do("POST", "/payments/notify/fake", `{"invoice_number":"FAKE-unknown"}`, nil); r.status != 404 {
+		t.Fatalf("unknown: %d", r.status)
+	}
+	if !strings.Contains(logs.String(), "payment notification failed") || !strings.Contains(logs.String(), "payment notification rejected") {
+		t.Fatalf("logs %s", logs.String())
+	}
 }

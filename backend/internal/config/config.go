@@ -26,14 +26,18 @@ type API struct {
 }
 
 // Payment selects and configures the payment gateway. Provider "fake" is the
-// local stand-in for development; "bkash" needs the merchant credentials.
+// local stand-in for development; "bkash" and "paystation" need the
+// merchant credentials.
 type Payment struct {
-	Provider       string
-	BkashBaseURL   string
-	BkashUsername  string
-	BkashPassword  string
-	BkashAppKey    string
-	BkashAppSecret string
+	Provider             string
+	BkashBaseURL         string
+	BkashUsername        string
+	BkashPassword        string
+	BkashAppKey          string
+	BkashAppSecret       string
+	PayStationBaseURL    string
+	PayStationMerchantID string
+	PayStationPassword   string
 }
 
 // DefaultExpiryInterval is how often the worker releases expired holds.
@@ -96,8 +100,12 @@ func loadPayment(getenv func(string) string, errs *[]error) Payment {
 		p.BkashPassword = required(getenv, "BKASH_PASSWORD", errs)
 		p.BkashAppKey = required(getenv, "BKASH_APP_KEY", errs)
 		p.BkashAppSecret = required(getenv, "BKASH_APP_SECRET", errs)
+	case "paystation":
+		p.PayStationBaseURL = required(getenv, "PAYSTATION_BASE_URL", errs)
+		p.PayStationMerchantID = required(getenv, "PAYSTATION_MERCHANT_ID", errs)
+		p.PayStationPassword = required(getenv, "PAYSTATION_PASSWORD", errs)
 	default:
-		*errs = append(*errs, fmt.Errorf("PAYMENT_PROVIDER must be fake or bkash, got %q", p.Provider))
+		*errs = append(*errs, fmt.Errorf("PAYMENT_PROVIDER must be fake, bkash or paystation, got %q", p.Provider))
 	}
 	return p
 }

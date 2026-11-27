@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -48,6 +49,7 @@ func NewPublic(d PublicDeps) http.Handler {
 	post(mux, "/api/v1/orders/{ref}/cancel", p.protect(p.cancelOrder))
 	post(mux, "/api/v1/orders/{ref}/checkout", p.protect(p.checkout))
 	get(mux, "/payments/return/{provider}", p.paymentReturn)
+	post(mux, "/payments/notify/{provider}", p.paymentNotify)
 	if d.FakeGatewayPage != nil {
 		mux.Handle("/payments/fake/pay/{ref}", d.FakeGatewayPage)
 	}
@@ -274,6 +276,32 @@ func (p *public) checkout(w http.ResponseWriter, r *http.Request) {
 // paymentReturn is where the provider sends the buyer back. It settles the
 // payment with the provider and redirects to the order page, which shows the
 // confirmed result. Unknown or unreadable returns go back to the event page.
+// paymentNotify receives a provider's server-to-server notification. The body
+// only names a payment; the service records it, asks the provider and
+// settles. 200 tells the provider to stop retrying; 503 asks it to retry.
+func (p *public) paymentNotify(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("provider") != p.Payments.Gateway.Provider() {
+		writeError(w, http.StatusNotFound, "not_found", "No such API route.")
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, "too_large", "Notification too large.")
+		return
+	}
+	err = p.Payments.Notify(r.Context(), body)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
+	case errors.Is(err, payments.ErrUnknownPayment), errors.Is(err, payments.ErrNotifyUnsupported):
+		p.Logger.Warn("payment notification rejected", "err", err)
+		writeError(w, http.StatusNotFound, "unknown_payment", "No such payment.")
+	default:
+		p.Logger.Error("payment notification failed", "err", err)
+		writeError(w, http.StatusServiceUnavailable, "retry", "Please retry this notification.")
+	}
+}
+
 func (p *public) paymentReturn(w http.ResponseWriter, r *http.Request) {
 	if r.PathValue("provider") != p.Payments.Gateway.Provider() {
 		writeError(w, http.StatusNotFound, "not_found", "No such API route.")

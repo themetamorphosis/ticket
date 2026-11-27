@@ -134,7 +134,18 @@ func TestPaymentProviders(t *testing.T) {
 		}
 	}
 	if _, err := LoadWorker(env(map[string]string{"DATABASE_URL": "x", "PAYMENT_PROVIDER": "paypal"})); err == nil ||
-		!strings.Contains(err.Error(), "fake or bkash") {
+		!strings.Contains(err.Error(), "fake, bkash or paystation") {
 		t.Fatalf("unknown provider: %v", err)
+	}
+	ps, err := LoadWorker(env(map[string]string{"DATABASE_URL": "x", "PAYMENT_PROVIDER": "paystation",
+		"PAYSTATION_BASE_URL": "https://p", "PAYSTATION_MERCHANT_ID": "m", "PAYSTATION_PASSWORD": "pw"}))
+	if err != nil || ps.Payment != (Payment{Provider: "paystation", PayStationBaseURL: "https://p", PayStationMerchantID: "m", PayStationPassword: "pw"}) {
+		t.Fatalf("paystation %+v %v", ps.Payment, err)
+	}
+	_, err = LoadWorker(env(map[string]string{"DATABASE_URL": "x", "PAYMENT_PROVIDER": "paystation"}))
+	for _, name := range []string{"PAYSTATION_BASE_URL", "PAYSTATION_MERCHANT_ID", "PAYSTATION_PASSWORD"} {
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("missing %s not reported: %v", name, err)
+		}
 	}
 }
