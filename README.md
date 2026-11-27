@@ -46,6 +46,16 @@ Credentials never go in the repository.
 | bKash | Only when we call Execute, so an expired hold is never charged | Refund API, checked before retrying | Not used; Execute and Query decide |
 | PayStation | Inside PayStation's page, so a late payment is recorded and refunded | No API: finance refunds in the merchant panel, and the refund completes here once PayStation reports it | `POST /payments/notify/paystation` (IPN URL to give PayStation), verified with Transaction Status |
 
+Paying for an order issues one ticket per place in the same transaction. The
+worker then renders each ticket as its own PDF (`ticket-1-of-3.pdf`, …),
+emails them all, and texts a private pickup link to `/pickup/`. Locally both
+channels are development stand-ins: see what they "sent", and open the PDFs, at
+http://localhost:8088/dev/outbox. Real email goes over SMTP
+(`EMAIL_PROVIDER=smtp`, works with a transactional provider's relay or
+Postfix). SMS waits for a Bangladeshi aggregator contract and sender ID.
+`TICKET_KEY` encrypts ticket credentials: back it up apart from the database,
+because without it tickets cannot be re-rendered.
+
 If ports 5432 or 6379 are already taken on your machine, copy `.env.example` to
 `.env` and change `DB_HOST_PORT` and `REDIS_HOST_PORT`. The tests talk to the
 services inside the Compose network, so host ports never affect them.
