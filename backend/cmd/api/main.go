@@ -12,14 +12,17 @@ import (
 
 	"kacheem/backend/internal/cmdutil"
 	"kacheem/backend/internal/config"
+	"kacheem/backend/internal/delivery"
 	"kacheem/backend/internal/httpapi"
 	"kacheem/backend/internal/listen"
 	"kacheem/backend/internal/payments"
 	"kacheem/backend/internal/payments/providers"
 	"kacheem/backend/internal/postgres"
 	"kacheem/backend/internal/redisx"
+	"kacheem/backend/internal/sealbox"
 	"kacheem/backend/internal/server"
 	"kacheem/backend/internal/session"
+	"kacheem/backend/internal/tickets"
 )
 
 var exit = os.Exit
@@ -65,7 +68,15 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 	if h, ok := gw.(http.Handler); ok {
 		fakePage = h
 	}
-	pay := &payments.Service{DB: pool, Gateway: gw, ReturnURL: cfg.PublicOrigin + "/payments/return/" + gw.Provider()}
+	box, _ := sealbox.New(cfg.Delivery.TicketKey) // validated by config
+	issuer := &tickets.Issuer{Box: box}
+	pay := &payments.Service{DB: pool, Gateway: gw, ReturnURL: cfg.PublicOrigin + "/payments/return/" + gw.Provider(),
+		// A paid order's tickets commit in the same transaction as its payment.
+		OnPaid: issuer.IssueInTx}
+	var devOutbox http.Handler
+	if delivery.UsesDevChannels(cfg.Delivery) {
+		devOutbox = delivery.DevOutbox(pool)
+	}
 	logger.Info("api listening", "public", cfg.PublicListen, "staff", cfg.StaffListen, "payment_provider", gw.Provider())
 	err = server.ServeAll(ctx, cfg.ShutdownTimeout,
 		server.Endpoint{Server: server.New(httpapi.NewPublic(httpapi.PublicDeps{
@@ -77,6 +88,7 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 			Payments: pay,
 			// Only the fake gateway serves a page of its own.
 			FakeGatewayPage: fakePage,
+			DevOutbox:       devOutbox,
 		}), logger), Listener: public},
 		server.Endpoint{Server: server.New(httpapi.NewStaff(checks), logger), Listener: staff},
 	)

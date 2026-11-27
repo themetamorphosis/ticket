@@ -6,7 +6,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+
+	"kacheem/backend/internal/sealbox"
 )
 
 // DefaultShutdownTimeout bounds graceful shutdown when SHUTDOWN_TIMEOUT is unset.
@@ -23,6 +26,53 @@ type API struct {
 	PublicOrigin    string
 	ShutdownTimeout time.Duration
 	Payment         Payment
+	Delivery        Delivery
+}
+
+// Delivery configures ticket issuance and the email and SMS channels.
+type Delivery struct {
+	// TicketKey seals ticket credentials (32 bytes, base64 in TICKET_KEY).
+	// Back it up apart from the database: without it tickets cannot be re-rendered.
+	TicketKey []byte
+	// GateOrigin is the staff scanner origin printed in every QR code.
+	GateOrigin string
+	// EmailProvider is "fake" (development outbox) or "smtp".
+	EmailProvider string
+	SMTPAddr      string
+	SMTPUsername  string
+	SMTPPassword  string
+	EmailFrom     string
+	// SMSProvider is "fake" until a Bangladeshi aggregator is contracted.
+	SMSProvider string
+}
+
+func loadDelivery(getenv func(string) string, errs *[]error) Delivery {
+	d := Delivery{
+		GateOrigin:    required(getenv, "GATE_ORIGIN", errs),
+		EmailProvider: required(getenv, "EMAIL_PROVIDER", errs),
+		SMSProvider:   required(getenv, "SMS_PROVIDER", errs),
+	}
+	if v := required(getenv, "TICKET_KEY", errs); v != "" {
+		key, err := sealbox.ParseKey(v)
+		if err != nil {
+			*errs = append(*errs, fmt.Errorf("TICKET_KEY: %w", err))
+		}
+		d.TicketKey = key
+	}
+	switch d.EmailProvider {
+	case "", "fake":
+	case "smtp":
+		d.SMTPAddr = required(getenv, "SMTP_ADDR", errs)
+		d.EmailFrom = required(getenv, "EMAIL_FROM", errs)
+		d.SMTPUsername, d.SMTPPassword = getenv("SMTP_USERNAME"), getenv("SMTP_PASSWORD")
+	default:
+		*errs = append(*errs, fmt.Errorf("EMAIL_PROVIDER must be fake or smtp, got %q", d.EmailProvider))
+	}
+	if d.SMSProvider != "" && d.SMSProvider != "fake" {
+		*errs = append(*errs, fmt.Errorf("SMS_PROVIDER must be fake until an SMS aggregator is integrated, got %q", d.SMSProvider))
+	}
+	d.GateOrigin = strings.TrimRight(d.GateOrigin, "/")
+	return d
 }
 
 // Payment selects and configures the payment gateway. Provider "fake" is the
@@ -48,6 +98,9 @@ type Worker struct {
 	DatabaseURL    string
 	ExpiryInterval time.Duration
 	Payment        Payment
+	Delivery       Delivery
+	// PublicOrigin is the buyer site, used in SMS pickup links.
+	PublicOrigin string
 }
 
 // Publish is the configuration of cmd/publish.
@@ -68,6 +121,7 @@ func LoadAPI(getenv func(string) string) (API, error) {
 		PublicOrigin:    required(getenv, "PUBLIC_ORIGIN", &errs),
 		ShutdownTimeout: duration(getenv, "SHUTDOWN_TIMEOUT", DefaultShutdownTimeout, &errs),
 		Payment:         loadPayment(getenv, &errs),
+		Delivery:        loadDelivery(getenv, &errs),
 	}
 	return cfg, errors.Join(errs...)
 }
@@ -79,6 +133,8 @@ func LoadWorker(getenv func(string) string) (Worker, error) {
 		DatabaseURL:    required(getenv, "DATABASE_URL", &errs),
 		ExpiryInterval: duration(getenv, "EXPIRY_INTERVAL", DefaultExpiryInterval, &errs),
 		Payment:        loadPayment(getenv, &errs),
+		Delivery:       loadDelivery(getenv, &errs),
+		PublicOrigin:   required(getenv, "PUBLIC_ORIGIN", &errs),
 	}
 	return cfg, errors.Join(errs...)
 }

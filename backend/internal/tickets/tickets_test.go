@@ -211,3 +211,45 @@ func TestDocument(t *testing.T) {
 	}
 	pgtest.EachFault(t, pool, func(db dbx.DB) error { _, err := Document(ctx, db, id); return err }, func(int, error) {})
 }
+
+func TestRedeem(t *testing.T) {
+	pool := pgtest.Pool(t)
+	oid := paidOrder(t, pool, 1)
+	for secret, sql := range map[string]string{
+		"valid":   `now() + interval '1 day', NULL`,
+		"expired": `now() - interval '1 second', NULL`,
+		"revoked": `now() + interval '1 day', now()`,
+	} {
+		if _, err := pool.Exec(ctx, `INSERT INTO download_grant (order_id, secret_digest, expires_at, revoked_at)
+			VALUES ($1, $2, `+sql+`)`, oid, Digest(secret)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := Redeem(ctx, pool, "valid"); err != nil || got != oid {
+		t.Fatalf("valid: %s %v", got, err)
+	}
+	for _, s := range []string{"expired", "revoked", "unknown"} {
+		if _, err := Redeem(ctx, pool, s); !errors.Is(err, ErrGrantInvalid) {
+			t.Errorf("%s: %v", s, err)
+		}
+	}
+	pgtest.EachFault(t, pool, func(db dbx.DB) error { _, err := Redeem(ctx, db, "valid"); return err }, func(int, error) {})
+}
+
+func TestIssueInTx(t *testing.T) {
+	pool := pgtest.Pool(t)
+	oid := paidOrder(t, pool, 2)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := issuer(t).IssueInTx(ctx, tx, oid); err != nil {
+		t.Fatal(err)
+	}
+	_ = tx.Commit(ctx)
+	var n int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM ticket WHERE order_id = $1`, oid).Scan(&n)
+	if n != 2 {
+		t.Fatalf("%d tickets", n)
+	}
+}

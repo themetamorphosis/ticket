@@ -15,9 +15,11 @@ import (
 
 	"kacheem/backend/internal/catalog"
 	"kacheem/backend/internal/dbx"
+	"kacheem/backend/internal/fulfil"
 	"kacheem/backend/internal/orders"
 	"kacheem/backend/internal/payments"
 	"kacheem/backend/internal/session"
+	"kacheem/backend/internal/tickets"
 )
 
 // PublicDeps are the collaborators of the buyer-facing API.
@@ -34,6 +36,9 @@ type PublicDeps struct {
 	// FakeGatewayPage serves the fake gateway's hosted page in development;
 	// nil with a real provider.
 	FakeGatewayPage http.Handler
+	// DevOutbox serves /dev/outbox with the development email and SMS
+	// channels; nil with real providers.
+	DevOutbox http.Handler
 }
 
 // NewPublic returns the handler for the buyer-facing listener. Staff routes
@@ -52,6 +57,14 @@ func NewPublic(d PublicDeps) http.Handler {
 	post(mux, "/payments/notify/{provider}", p.paymentNotify)
 	if d.FakeGatewayPage != nil {
 		mux.Handle("/payments/fake/pay/{ref}", d.FakeGatewayPage)
+	}
+	get(mux, "/api/v1/tickets/{id}/pdf", p.ticketPDF)
+	post(mux, "/api/v1/pickup/exchange", p.protect(p.pickupExchange))
+	get(mux, "/api/v1/pickup", p.pickupList)
+	post(mux, "/api/v1/orders/{ref}/resend", p.protect(p.resend))
+	if d.DevOutbox != nil {
+		mux.Handle("/dev/outbox", d.DevOutbox)
+		mux.Handle("/dev/outbox/", d.DevOutbox)
 	}
 	return withDefaults(d.Sessions.LoadAndSave(mux))
 }
@@ -254,7 +267,131 @@ func (p *public) getOrder(w http.ResponseWriter, r *http.Request) {
 		entries[i] = map[string]string{"at": e.At.UTC().Format(time.RFC3339), "kind": e.Kind}
 	}
 	body["timeline"] = entries
+	ts, err := tickets.ForOrder(ctx, p.DB, o.ID)
+	if err != nil {
+		p.internal(w, r, err)
+		return
+	}
+	body["tickets"] = ticketsJSON(ts)
+	ds, err := fulfil.Deliveries(ctx, p.DB, o.ID)
+	if err != nil {
+		p.internal(w, r, err)
+		return
+	}
+	deliveries := map[string]any{}
+	for _, d := range ds {
+		deliveries[d.Channel] = map[string]string{"status": d.Status, "at": d.At.UTC().Format(time.RFC3339)}
+	}
+	body["deliveries"] = deliveries
 	writeJSON(w, http.StatusOK, body)
+}
+
+func ticketsJSON(ts []tickets.Info) []map[string]any {
+	out := make([]map[string]any, len(ts))
+	for i, t := range ts {
+		out[i] = map[string]any{"id": t.ID, "number": t.Ordinal, "of": t.Of, "status": t.Status, "ready": t.Ready,
+			"pdf_url": "/api/v1/tickets/" + t.ID + "/pdf"}
+	}
+	return out
+}
+
+// ticketPDF streams one ticket to its buyer, or to a session that redeemed a
+// pickup link for its order. Anyone else gets the same 404 as a missing ticket.
+func (p *public) ticketPDF(w http.ResponseWriter, r *http.Request) {
+	f, err := tickets.Document(r.Context(), p.DB, r.PathValue("id"))
+	if err != nil && !errors.Is(err, tickets.ErrNotFound) {
+		p.internal(w, r, err)
+		return
+	}
+	if err != nil || !session.CanSee(p.Sessions, r, f.OrderID, f.BuyerID) {
+		writeError(w, http.StatusNotFound, "ticket_not_found", "No such ticket, or it is not ready yet.")
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "application/pdf")
+	h.Set("Content-Disposition", `attachment; filename="`+f.Name()+`"`)
+	h.Set("Content-Length", strconv.Itoa(len(f.PDF)))
+	h.Set("Referrer-Policy", "no-referrer")
+	_, _ = w.Write(f.PDF)
+}
+
+// pickupExchange trades the secret from an SMS pickup link for access in this
+// session, so the secret itself never needs to be sent again.
+func (p *public) pickupExchange(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Secret string `json:"secret"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_json", "The request body is not valid.")
+		return
+	}
+	orderID, err := tickets.Redeem(r.Context(), p.DB, body.Secret)
+	if errors.Is(err, tickets.ErrGrantInvalid) {
+		writeError(w, http.StatusNotFound, "pickup_invalid", "This ticket link is not valid or has expired.")
+		return
+	}
+	if err == nil {
+		err = session.AddPickup(p.Sessions, r, orderID)
+	}
+	if err != nil {
+		p.internal(w, r, err)
+		return
+	}
+	p.writePickups(w, r, []string{orderID})
+}
+
+// pickupList shows the orders this session redeemed pickup links for.
+func (p *public) pickupList(w http.ResponseWriter, r *http.Request) {
+	p.writePickups(w, r, session.Pickups(p.Sessions, r))
+}
+
+// writePickups lists orders with their tickets but without purchaser contact
+// details, which the holder of a pickup link does not need.
+func (p *public) writePickups(w http.ResponseWriter, r *http.Request, orderIDs []string) {
+	out := []map[string]any{}
+	for _, id := range orderIDs {
+		o, err := orders.GetByID(r.Context(), p.DB, id)
+		if err != nil {
+			p.internal(w, r, err)
+			return
+		}
+		ts, err := tickets.ForOrder(r.Context(), p.DB, id)
+		if err != nil {
+			p.internal(w, r, err)
+			return
+		}
+		out = append(out, map[string]any{
+			"ref": o.Ref, "status": o.Status, "tickets": ticketsJSON(ts),
+			"event": map[string]any{"title": o.EventTitle, "starts_at": o.EventStartsAt.UTC().Format(time.RFC3339),
+				"time_zone": o.EventTimeZone},
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"orders": out})
+}
+
+// resend sends the original tickets again to the recorded email and phone,
+// at most once every ten minutes.
+func (p *public) resend(w http.ResponseWriter, r *http.Request) {
+	o, err := orders.Get(r.Context(), p.DB, session.Current(p.Sessions, r).ID, r.PathValue("ref"))
+	if err != nil {
+		p.orderError(w, r, err)
+		return
+	}
+	if o.Status != "paid" {
+		writeError(w, http.StatusConflict, "not_paid", "Tickets are sent once payment is confirmed.")
+		return
+	}
+	err = fulfil.Resend(r.Context(), p.DB, o.ID)
+	switch {
+	case errors.Is(err, fulfil.ErrTooSoon):
+		writeError(w, http.StatusTooManyRequests, "too_soon", "Your tickets were sent a few minutes ago. Please check your email and messages.")
+	case err != nil:
+		p.internal(w, r, err)
+	default:
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "queued"})
+	}
 }
 
 func (p *public) checkout(w http.ResponseWriter, r *http.Request) {

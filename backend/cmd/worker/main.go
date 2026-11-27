@@ -1,6 +1,6 @@
 // Command worker runs background jobs under systemd, on hosts separate from
 // buyer traffic: it releases expired holds, reconciles payments the buyer
-// never returned from, and sends refunds. Later milestones add fulfillment.
+// never returned from, sends refunds, and renders and delivers tickets.
 package main
 
 import (
@@ -12,10 +12,14 @@ import (
 
 	"kacheem/backend/internal/cmdutil"
 	"kacheem/backend/internal/config"
+	"kacheem/backend/internal/delivery"
+	"kacheem/backend/internal/fulfil"
 	"kacheem/backend/internal/orders"
 	"kacheem/backend/internal/payments"
 	"kacheem/backend/internal/payments/providers"
 	"kacheem/backend/internal/postgres"
+	"kacheem/backend/internal/sealbox"
+	"kacheem/backend/internal/tickets"
 )
 
 var exit = os.Exit
@@ -28,6 +32,7 @@ const (
 	reconcileIdle  = 2 * time.Minute
 	reconcileBatch = 100
 	refundBatch    = 50
+	fulfilBatch    = 20
 )
 
 func main() {
@@ -47,7 +52,12 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 		return err
 	}
 	defer pool.Close()
-	pay := &payments.Service{DB: pool, Gateway: providers.New(cfg.Payment, pool, "")}
+	box, _ := sealbox.New(cfg.Delivery.TicketKey) // validated by config
+	issuer := &tickets.Issuer{Box: box}
+	pay := &payments.Service{DB: pool, Gateway: providers.New(cfg.Payment, pool, ""),
+		OnPaid: issuer.IssueInTx}
+	ful := &fulfil.Fulfiller{DB: pool, Issuer: issuer, Mailer: delivery.NewMailer(cfg.Delivery, pool),
+		SMS: delivery.NewSMS(cfg.Delivery, pool), PublicOrigin: cfg.PublicOrigin, GateOrigin: cfg.Delivery.GateOrigin}
 	logger.Info("worker started", "expiry_interval", cfg.ExpiryInterval.String(), "payment_provider", pay.Gateway.Provider())
 
 	tick := time.NewTicker(cfg.ExpiryInterval)
@@ -63,6 +73,7 @@ func run(ctx context.Context, getenv func(string) string, logOut io.Writer) erro
 			step(ctx, logger, "released expired holds", func() (int, error) { return orders.ExpireDue(ctx, pool, expiryBatch) })
 			step(ctx, logger, "reconciled payments", func() (int, error) { return pay.Reconcile(ctx, reconcileIdle, reconcileBatch) })
 			step(ctx, logger, "processed refunds", func() (int, error) { return pay.ProcessRefunds(ctx, refundBatch) })
+			step(ctx, logger, "ran fulfilment jobs", func() (int, error) { return ful.Run(ctx, fulfilBatch) })
 		}
 	}
 }

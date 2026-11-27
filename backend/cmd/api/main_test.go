@@ -23,6 +23,10 @@ func baseEnv(t *testing.T) map[string]string {
 		"API_STAFF_LISTEN":  "unix:" + filepath.Join(dir, "staff.sock"),
 		"PUBLIC_ORIGIN":     "https://tickets.test",
 		"PAYMENT_PROVIDER":  "fake",
+		"TICKET_KEY":        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+		"GATE_ORIGIN":       "https://gate.test",
+		"EMAIL_PROVIDER":    "fake",
+		"SMS_PROVIDER":      "fake",
 		"SHUTDOWN_TIMEOUT":  "2s",
 	}
 }

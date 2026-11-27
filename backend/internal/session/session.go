@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/scs/pgxstore"
@@ -24,7 +25,8 @@ const (
 )
 
 // NewBuyer returns the buyer session manager. cleanup is how often expired
-// rows are deleted (0 disables the background job, for tests).
+// rows are deleted (0 disables the background job, for tests). onError
+// answers session-store failures; nil keeps SCS's default plain-text 500.
 func NewBuyer(pool *pgxpool.Pool, cleanup time.Duration, onError func(http.ResponseWriter, *http.Request, error)) *scs.SessionManager {
 	m := scs.New()
 	m.Store = pgxstore.NewWithConfig(pool, pgxstore.Config{TableName: "buyer_session", CleanUpInterval: cleanup})
@@ -36,7 +38,9 @@ func NewBuyer(pool *pgxpool.Pool, cleanup time.Duration, onError func(http.Respo
 	m.Cookie.SameSite = http.SameSiteLaxMode
 	m.Cookie.Path = "/"
 	m.Cookie.Persist = true
-	m.ErrorFunc = onError
+	if onError != nil {
+		m.ErrorFunc = onError
+	}
 	return m
 }
 
@@ -83,4 +87,53 @@ func random() string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+const keyPickups = "pickup_orders"
+
+// maxPickups bounds how many redeemed pickup links one session remembers.
+const maxPickups = 20
+
+// AddPickup records that this session redeemed a pickup link for orderID.
+// The session token is renewed, as on any privilege change.
+func AddPickup(m *scs.SessionManager, r *http.Request, orderID string) error {
+	ctx := r.Context()
+	ids := Pickups(m, r)
+	for _, id := range ids {
+		if id == orderID {
+			return nil
+		}
+	}
+	ids = append(ids, orderID)
+	if len(ids) > maxPickups {
+		ids = ids[len(ids)-maxPickups:]
+	}
+	if err := m.RenewToken(ctx); err != nil {
+		return err
+	}
+	m.Put(ctx, keyPickups, strings.Join(ids, ","))
+	return nil
+}
+
+// Pickups lists the orders this session may download through pickup links.
+func Pickups(m *scs.SessionManager, r *http.Request) []string {
+	v := m.GetString(r.Context(), keyPickups)
+	if v == "" {
+		return nil
+	}
+	return strings.Split(v, ",")
+}
+
+// CanSee reports whether this session may see orderID's tickets: as the buyer
+// who placed it, or through a redeemed pickup link.
+func CanSee(m *scs.SessionManager, r *http.Request, orderID, orderBuyerID string) bool {
+	if b := Current(m, r).ID; b != "" && b == orderBuyerID {
+		return true
+	}
+	for _, id := range Pickups(m, r) {
+		if id == orderID {
+			return true
+		}
+	}
+	return false
 }

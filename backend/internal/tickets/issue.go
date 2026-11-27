@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/jackc/pgx/v5"
+
 	"kacheem/backend/internal/dbx"
 	"kacheem/backend/internal/outbox"
 	"kacheem/backend/internal/sealbox"
@@ -65,4 +67,9 @@ func (i *Issuer) Open(data []byte) (Secrets, error) {
 	var s sealed
 	_ = json.Unmarshal(plain, &s)
 	return Secrets{Credential: s.Credential, Fallback: s.Fallback}, nil
+}
+
+// IssueInTx is Issue with the payments.Service OnPaid hook's signature.
+func (i *Issuer) IssueInTx(ctx context.Context, tx pgx.Tx, orderID string) error {
+	return i.Issue(ctx, tx, orderID)
 }

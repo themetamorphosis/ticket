@@ -405,3 +405,12 @@ func TestActiveHoldLookupFailure(t *testing.T) {
 		t.Fatal("expected error when the conflicting hold cannot be found")
 	}
 }
+
+func TestGetByID(t *testing.T) {
+	pool := setup(t, pgtest.Event{})
+	o, _, _ := Reserve(ctx, pool, request("buyer-1", "key-00000001", 1))
+	got, err := GetByID(ctx, pool, o.ID)
+	if err != nil || got.Ref != o.Ref {
+		t.Fatalf("%+v %v", got, err)
+	}
+}

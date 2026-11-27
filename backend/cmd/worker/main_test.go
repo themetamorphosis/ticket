@@ -59,7 +59,9 @@ func TestWorkerReleasesExpiredHolds(t *testing.T) {
 	var logs syncBuffer
 	done := make(chan error, 1)
 	go func() {
-		done <- run(runCtx, getter(map[string]string{"DATABASE_URL": pool.Config().ConnString(), "PAYMENT_PROVIDER": "fake", "EXPIRY_INTERVAL": "20ms"}), &logs)
+		done <- run(runCtx, getter(map[string]string{"DATABASE_URL": pool.Config().ConnString(), "PAYMENT_PROVIDER": "fake", "EXPIRY_INTERVAL": "20ms",
+			"PUBLIC_ORIGIN": "https://tickets.test", "TICKET_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+			"GATE_ORIGIN": "https://gate.test", "EMAIL_PROVIDER": "fake", "SMS_PROVIDER": "fake"}), &logs)
 	}()
 	waitFor(t, func() bool { return strings.Contains(logs.String(), "released expired holds") })
 	cancel()
@@ -79,12 +81,14 @@ func TestWorkerKeepsRunningWhenReleaseFails(t *testing.T) {
 	var logs syncBuffer
 	done := make(chan error, 1)
 	go func() {
-		done <- run(ctx, getter(map[string]string{"DATABASE_URL": url, "PAYMENT_PROVIDER": "fake", "EXPIRY_INTERVAL": "20ms"}), &logs)
+		done <- run(ctx, getter(map[string]string{"DATABASE_URL": url, "PAYMENT_PROVIDER": "fake", "EXPIRY_INTERVAL": "20ms",
+			"PUBLIC_ORIGIN": "https://tickets.test", "TICKET_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+			"GATE_ORIGIN": "https://gate.test", "EMAIL_PROVIDER": "fake", "SMS_PROVIDER": "fake"}), &logs)
 	}()
 	waitFor(t, func() bool {
 		l := logs.String()
 		return strings.Count(l, "released expired holds failed") >= 2 && strings.Contains(l, "reconciled payments failed") &&
-			strings.Contains(l, "processed refunds failed")
+			strings.Contains(l, "processed refunds failed") && strings.Contains(l, "ran fulfilment jobs failed")
 	})
 	cancel()
 	if err := <-done; err != nil {
@@ -95,7 +99,9 @@ func TestWorkerKeepsRunningWhenReleaseFails(t *testing.T) {
 func TestRunFailures(t *testing.T) {
 	for name, env := range map[string]map[string]string{
 		"missing config": {},
-		"database down":  {"DATABASE_URL": "postgres://app:x@127.0.0.1:1/x?connect_timeout=1", "PAYMENT_PROVIDER": "fake"},
+		"database down": {"DATABASE_URL": "postgres://app:x@127.0.0.1:1/x?connect_timeout=1", "PAYMENT_PROVIDER": "fake",
+			"PUBLIC_ORIGIN": "https://tickets.test", "TICKET_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+			"GATE_ORIGIN": "https://gate.test", "EMAIL_PROVIDER": "fake", "SMS_PROVIDER": "fake"},
 	} {
 		if err := run(context.Background(), getter(env), io.Discard); err == nil {
 			t.Errorf("%s: expected error", name)

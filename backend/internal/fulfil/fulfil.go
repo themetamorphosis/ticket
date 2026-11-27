@@ -271,3 +271,16 @@ func Resend(ctx context.Context, db dbx.DB, orderID string) error {
 		return queueDelivery(ctx, tx, orderID, fmt.Sprintf("resend:%d", time.Now().UnixNano()))
 	})
 }
+
+// Delivery is the latest outcome on one channel.
+type Delivery struct {
+	Channel string    `db:"channel"`
+	Status  string    `db:"status"`
+	At      time.Time `db:"created_at"`
+}
+
+// Deliveries returns the latest email and SMS outcome for an order.
+func Deliveries(ctx context.Context, db dbx.DB, orderID string) ([]Delivery, error) {
+	return dbx.All[Delivery](ctx, db, `SELECT DISTINCT ON (channel) channel, status, created_at
+		FROM delivery_attempt WHERE order_id = $1 ORDER BY channel, id DESC`, orderID)
+}

@@ -95,6 +95,11 @@ func Get(ctx context.Context, db dbx.DB, buyerID, ref string) (Order, error) {
 	return o, err
 }
 
+// GetByID returns an order by its internal ID, without an ownership check.
+func GetByID(ctx context.Context, db dbx.DB, id string) (Order, error) {
+	return getByID(ctx, db, id)
+}
+
 func getByID(ctx context.Context, db dbx.DB, id string) (Order, error) {
 	return dbx.One[Order](ctx, db, orderView+` WHERE o.id = $1`, id)
 }

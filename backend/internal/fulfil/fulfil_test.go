@@ -293,3 +293,22 @@ func TestEveryFailurePointIsRetried(t *testing.T) {
 		t.Fatal("jobs left over")
 	}
 }
+
+func TestDeliveriesShowsLatestPerChannel(t *testing.T) {
+	e := setup(t)
+	oid := e.pay("buyer-1", 1)
+	if d, err := Deliveries(ctx, e.pool, oid); err != nil || len(d) != 0 {
+		t.Fatalf("%v %v", d, err)
+	}
+	e.out.fail = errors.New("down")
+	_, _ = e.f.Run(ctx, 10)
+	_, _ = e.f.Run(ctx, 10)
+	e.out.fail = nil
+	_, _ = e.pool.Exec(ctx, `UPDATE outbox_job SET run_at = now()`)
+	e.drain()
+	d, err := Deliveries(ctx, e.pool, oid)
+	if err != nil || len(d) != 2 || d[0].Channel != "email" || d[0].Status != "sent" || d[1].Channel != "sms" || d[1].Status != "sent" {
+		t.Fatalf("%+v %v", d, err)
+	}
+	pgtest.EachFault(t, e.pool, func(db dbx.DB) error { _, err := Deliveries(ctx, db, oid); return err }, func(int, error) {})
+}

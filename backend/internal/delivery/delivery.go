@@ -9,7 +9,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"kacheem/backend/internal/config"
 	"kacheem/backend/internal/dbx"
 )
 
@@ -73,4 +75,21 @@ func record(ctx context.Context, db dbx.DB, channel, to, subject, body, atts str
 	err := db.QueryRow(ctx, `INSERT INTO dev_message (channel, recipient, subject, body, attachments)
 		VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id`, channel, to, subject, body, atts).Scan(&id)
 	return fmt.Sprintf("dev-%d", id), err
+}
+
+// NewMailer returns the configured email channel.
+func NewMailer(cfg config.Delivery, db dbx.DB) Mailer {
+	if cfg.EmailProvider == "smtp" {
+		return SMTP{Addr: cfg.SMTPAddr, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, From: cfg.EmailFrom,
+			Timeout: 60 * time.Second}
+	}
+	return DevMailer{DB: db}
+}
+
+// NewSMS returns the configured SMS channel (development only, for now).
+func NewSMS(cfg config.Delivery, db dbx.DB) SMS { return DevSMS{DB: db} }
+
+// UsesDevChannels reports whether /dev/outbox has anything to show.
+func UsesDevChannels(cfg config.Delivery) bool {
+	return cfg.EmailProvider != "smtp" || cfg.SMSProvider == "fake"
 }

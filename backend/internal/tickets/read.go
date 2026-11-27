@@ -63,3 +63,17 @@ func Document(ctx context.Context, db dbx.DB, ticketID string) (File, error) {
 	}
 	return f, err
 }
+
+// ErrGrantInvalid means a pickup secret is unknown, revoked or expired.
+var ErrGrantInvalid = errors.New("tickets: pickup link is invalid or has expired")
+
+// Redeem checks a pickup secret and returns the order it grants access to.
+func Redeem(ctx context.Context, db dbx.DB, secret string) (string, error) {
+	var orderID string
+	err := db.QueryRow(ctx, `SELECT order_id::text FROM download_grant
+		WHERE secret_digest = $1 AND revoked_at IS NULL AND expires_at > now()`, Digest(secret)).Scan(&orderID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrGrantInvalid
+	}
+	return orderID, err
+}
